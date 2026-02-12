@@ -1,0 +1,125 @@
+################################################################################
+# SPDX-FileCopyrightText: Copyright (c) 2019-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+
+# ==============================================================================
+# nvinfer 推理插件配置文件(Primary GIE 主推理引擎) 
+# ==============================================================================
+# 本文件由 nvinfer 插件读取，用于配置 TensorRT 目标检测模型。
+# 使用的模型：resnet18_trafficcamnet(交通场景检测，可识别车辆/自行车/行人/交通标志) 
+#
+# 配置文件结构：
+#   [property]       - 模型路径、GPU、精度、批大小等
+#   [class-attrs-*]  - 每类或全部类别的后处理参数(阈值、NMS 等) 
+#
+# 【以下为 NVIDIA 文档中的属性说明，供参考】
+# Following properties are mandatory when engine files are not specified:
+#   int8-calib-file(Only in INT8)
+#   Caffemodel mandatory properties: model-file, proto-file, output-blob-names
+#   UFF: uff-file, input-dims, uff-input-blob-name, output-blob-names
+#   ONNX: onnx-file
+#
+# Mandatory properties for detectors:
+#   num-detected-classes
+#
+# Optional properties for detectors:
+#   cluster-mode(Default=Group Rectangles), interval(Primary mode only, Default=0)
+#   custom-lib-path,
+#   parse-bbox-func-name
+#
+# Mandatory properties for classifiers:
+#   classifier-threshold, is-classifier
+#
+# Optional properties for classifiers:
+#   classifier-async-mode(Secondary mode only, Default=false)
+#
+# Optional properties in secondary mode:
+#   operate-on-gie-id(Default=0), operate-on-class-ids(Defaults to all classes),
+#   input-object-min-width, input-object-min-height, input-object-max-width,
+#   input-object-max-height
+#
+# Following properties are always recommended:
+#   batch-size(Default=1)
+#
+# Other optional properties:
+#   net-scale-factor(Default=1), network-mode(Default=0 i.e FP32),
+#   model-color-format(Default=0 i.e. RGB) model-engine-file, labelfile-path,
+#   mean-file, gie-unique-id(Default=0), offsets, process-mode (Default=1 i.e. primary),
+#   custom-lib-path, network-mode(Default=0 i.e FP32)
+#
+# The values in the config file are overridden by values set through GObject
+# properties.
+
+# ==============================================================================
+# [property] 主要配置节
+# ==============================================================================
+[property]
+# 使用的 GPU 编号，多卡时可用 0、1、2...
+gpu-id=0
+
+# 输入像素的缩放因子，用于归一化
+# 0.00392156862745098 = 1/255，将 [0,255] 缩放到 [0,1]
+net-scale-factor=0.00392156862745098
+
+# ONNX 模型文件路径(仅当 engine 不存在时用于生成；engine 存在则直接加载 engine，不重建)
+onnx-file=/home/good/wkspace/deepstream-sdk/ds8samples/models/Primary_Detector/resnet18_trafficcamnet_pruned.onnx
+
+# TensorRT 序列化 engine 路径。若该文件已存在则直接加载(不重建)；不存在则从 onnx 生成并写入此处。
+# 命名须与内部约定一致：模型名_b{batch}gpu{gpu}_{精度}.engine，例如 _b1_gpu0_fp16.engine（与 SDK 示例一致）
+model-engine-file=/home/good/wkspace/deepstream-sdk/ds8samples/models/Primary_Detector/resnet18_trafficcamnet_pruned.onnx_b1_gpu0_fp16.engine
+
+# 类别标签文件，每行一个类别，顺序对应 class_id 0、1、2、3...
+labelfile-path=/home/good/wkspace/deepstream-sdk/ds8samples/models/Primary_Detector/labels.txt
+
+# INT8 量化时的校准文件(仅 network-mode=1 时使用，本示例用 FP16 可不关心) 
+int8-calib-file=/home/good/wkspace/deepstream-sdk/ds8samples/models/Primary_Detector/cal_trt.bin
+
+# 批大小，需与 streammux 的 batch-size 一致
+# 一路视频 此处 与 streammux 一致 为 1
+batch-size=1
+
+# 推理精度：0=FP32, 1=INT8, 2=FP16
+network-mode=2
+
+# 检测类别数量(Vehicle/Bicycle/Person/RoadSign 共 4 类) 
+num-detected-classes=4
+
+# Primary 模式下的推理间隔，0 表示每帧都推理
+interval=0
+
+# 推理引擎唯一 ID，用于多 GIE 时区分
+gie-unique-id=1
+
+# 缩放过滤器和硬件(通常使用默认即可) 
+#scaling-filter=0
+#scaling-compute-hw=0
+
+# 检测框聚类/合并模式：2 表示 DBSCAN 聚类
+# 用于将重叠的候选框合并为最终检测框
+cluster-mode=2
+
+# ==============================================================================
+# [class-attrs-all] 类别相关属性(对所有类别生效) 
+# ==============================================================================
+[class-attrs-all]
+# 聚类前的置信度阈值，低于此值的检测会被过滤
+pre-cluster-threshold=0.2
+
+# 每个类保留的最大检测框数量(按置信度排序取 top-k) 
+topk=20
+
+# NMS(非极大值抑制) 的 IoU 阈值，重叠度高于此值的框会被抑制
+nms-iou-threshold=0.5
