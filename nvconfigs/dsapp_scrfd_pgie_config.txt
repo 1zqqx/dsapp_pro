@@ -1,0 +1,44 @@
+################################################################################
+# nvinfer 配置：InsightFace SCRFD 人脸检测
+################################################################################
+# 模型：SCRFD (Scaled-RoI Face Detection)，单类别「人脸」
+# 输入：640x640 RGB（由 nvinfer 内部缩放）
+# 输出：需自定义解析器解析 9 个输出层（score/bbox/kps × stride 8,16,32）
+#
+# 使用前必做：
+#   1. 将 SCRFD ONNX 放到下方 onnx-file 路径
+#   2. 编译自定义 bbox 解析库 .so，并设置 custom-lib-path、parse-bbox-func-name
+#   3. 首次运行会生成 engine; 之后若 engine 文件存在则直接加载
+################################################################################
+
+[property]
+gpu-id=0
+# 像素归一化，常见 1/255 或 0.017 (ImageNet 风格)
+net-scale-factor=0.00392156862745098
+
+# TODO: SCRFD ONNX
+onnx-file=/home/good/wkspace/pubdata/models/scrfd/scrfd_2.5g_bnkps_640x640.onnx
+model-engine-file=/home/good/wkspace/pubdata/models/scrfd/scrfd_2.5g_bnkps_640x640.onnx_b1_gpu0_fp16.engine
+
+# 单类别：人脸（标签文件一行 "face" 即可）
+labelfile-path=/home/good/wkspace/pubdata/models/scrfd/labels.txt
+
+batch-size=1
+network-mode=2
+num-detected-classes=1
+interval=0
+gie-unique-id=1
+cluster-mode=2
+
+# XXX 自定义解析器：SCRFD 输出为多尺度 score/bbox/kps，必须用自定义解析
+# 解析库需自行编译，实现 NvDsInferParseCustomFunc 并导出下方函数名
+parse-bbox-func-name=NvDsInferParseCustomSCRFD
+custom-lib-path=/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/libs/libnvdsinfer_custom_scrfd.so
+
+# 输入为 RGB
+model-color-format=0
+
+[class-attrs-all]
+pre-cluster-threshold=0.5
+topk=20
+nms-iou-threshold=0.4
