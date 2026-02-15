@@ -39,15 +39,15 @@ def acquire_nvstreammux(index: int = 0, args: dict = None):
         raise RuntimeError(" Unable to create nvstreammux ")
 
     gpu_id = args.get("gpu_id", None)
-    if gpu_id:
+    if gpu_id is not None:
         streammux.set_property("gpu_id", gpu_id)
 
     batch_size = args.get("batch_size", None)
-    if batch_size:
+    if batch_size is not None:
         streammux.set_property("batch-size", batch_size)
 
     batched_push_timeout = args.get("batched_push_timeout", None)
-    if batched_push_timeout:
+    if batched_push_timeout is not None:
         streammux.set_property("batched-push-timeout", batched_push_timeout)
 
     live_source = args.get("live_source", None)
@@ -55,17 +55,17 @@ def acquire_nvstreammux(index: int = 0, args: dict = None):
         streammux.set_property("live-source", bool(live_source))
 
     width = args.get("width", None)
-    if width:
+    if width is not None:
         streammux.set_property("width", width)
 
     height = args.get("height", None)
-    if height:
+    if height is not None:
         streammux.set_property("height", height)
 
     return streammux
 
 
-def acquire_primary_nvinfer(index: int = 0, args: dict = None):
+def acquire_nvinfer(index: int = 0, args: dict = None):
     """
     Create primary nvinfer instance to perform inference.
     All properties will use profile properties if they are not set.
@@ -91,7 +91,7 @@ def acquire_primary_nvinfer(index: int = 0, args: dict = None):
 
     args:
     + gpu_id: Set GPU Device ID.
-    + batch_size: Maximum batch size for inference.
+    + batch_size: Maximum batch size for inference. XXX sgie & pgie.
     + config_file_path: Path to the TensorRT engine configuration file.
     + interval: Specifies number of consecutive batches to be skipped for inference. Default: 0-infer on erery frame
     + model_engine_file: Absolute path to the pre-generated serialized engine file for the model. default None
@@ -105,16 +105,16 @@ def acquire_primary_nvinfer(index: int = 0, args: dict = None):
     + Gst.Element: primary nvinfer instance
     """
     args = args or {}
-    pgie = Gst.ElementFactory.make("nvinfer", f"primary-inference-{index:02d}")
+    pgie = Gst.ElementFactory.make("nvinfer", f"nvinfer-{index:03d}")
     if not pgie:
         raise RuntimeError(" Unable to create primary nvinfer ")
 
     gpu_id = args.get("gpu_id", None)
-    if gpu_id:
+    if gpu_id is not None:
         pgie.set_property("gpu_id", gpu_id)
 
     batch_size = args.get("batch_size", None)
-    if batch_size:
+    if batch_size is not None:
         pgie.set_property("batch-size", batch_size)
 
     config_file_path = args.get("config_file_path", None)
