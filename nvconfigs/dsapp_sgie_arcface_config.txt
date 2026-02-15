@@ -1,0 +1,49 @@
+################################################################################
+# nvinfer 配置：Secondary GIE - ArcFace 人脸识别（embedding）
+################################################################################
+# 用途：对 PGIE（如 SCRFD）检测到的人脸做二次推理，输出 512 维 embedding.
+# 应用层通过 output-tensor-meta 取 embedding，与底库比对得到「是谁」.
+#
+# 使用前：
+#   1. 准备 ArcFace ONNX（如 r50/w600k），输入 112x112 人脸 crop
+#   2. 编译自定义 classifier 解析库并设置 parse-classifier-func-name / custom-lib-path
+#   3. 确保 PGIE 的 gie-unique-id 与下方 operate-on-gie-id 一致（如 1）
+################################################################################
+
+[property]
+gpu-id=0
+net-scale-factor=0.00392156862745098
+
+# ArcFace ONNX 路径
+onnx-file=/home/good/wkspace/pubdata/models/arcface/arcface_r50_webface.onnx
+model-engine-file=/home/good/wkspace/pubdata/models/arcface/arcface_r50_webface.onnx_b1_gpu0_fp16.engine
+
+batch-size=1
+network-mode=2
+
+# 分类器模式；process-mode=2 表示 secondary，对 PGIE 输出的对象做 ROI 推理
+process-mode=2
+is-classifier=1
+
+# 与 PGIE (SCRFD) 的 gie-unique-id 一致
+operate-on-gie-id=1
+
+# 只对人脸类做识别 (SCRFD 的 class 0 = face)
+operate-on-class-ids=0
+
+# 回调函数使用 SGIE_ARCFACE_UNIQUE_ID = 2 一致
+gie-unique-id=2
+
+# 必须 1, 否则应用层拿不到 embedding tensor
+output-tensor-meta=1
+
+# 自定义分类解析 ArcFace 输出为 embedding, 此处仅做占位解析
+parse-classifier-func-name=NvDsInferParseCustomArcFace
+custom-lib-path=/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/libs/libnvdsinfer_custom_arcface_r50_wbface.so
+
+classifier-async-mode=0
+
+# 分类器阈值 本解析器未用 仅占位
+classifier-threshold=0.5
+
+model-color-format=0
