@@ -143,6 +143,7 @@ def acquire_nvurisrcbin(index: int = 0, uri: str = "0", args=None):
     + uri: str = None, source uri
     + file-loop: bool, default False, Loop file sources after EOS.
     + cudadec-memtype: int = [0/1/2], default 0, Set to specify memory type for cuda decoder buffers, more info -> nvurisrcbin
+    + latency: int, default 100, Latency in milliseconds to buffer data from source before pushing downstream. This is used to smooth out jitter in live sources such as RTSP streams. Higher latency will result in smoother playback, but increased time to display the first frame.
 
     Returns:
     + Gst.Bin: 带 ghost pad "src" 的 source bin
@@ -172,10 +173,86 @@ def acquire_nvurisrcbin(index: int = 0, uri: str = "0", args=None):
     source.connect("pad-added", _cb_newpad, cre_bin)
     source.connect("child-added", _decodebin_child_added, cre_bin)
 
+    # _identity = Gst.ElementFactory.make("identity", f"identity-{index:02}")
+    # # True 则按帧率显示, 按照管道时钟, False 则尽快显示
+    # _identity.set_property("sync", True)
+
     Gst.Bin.add(cre_bin, source)
+    # Gst.Bin.add(cre_bin, _identity)
+    # source.link(_identity)
     ghost_pad = cre_bin.add_pad(Gst.GhostPad.new_no_target("src", Gst.PadDirection.SRC))
     if not ghost_pad:
         raise RuntimeError(f" Failed to add ghost pad in {bin_name} ")
+
+    return cre_bin
+
+
+def acquire_filesrc_h264_bin(index: int = 0, path: str = "", args=None):
+    """
+    使用显式 filesrc + qtdemux/h264parse + nvv4l2decoder 创建 source bin
+    用于绕过 nvurisrcbin 对部分 MP4 的 segment 问题 或支持裸 H.264 流
+
+    支持:
+    + MP4/MOV/M4V: filesrc -> qtdemux -(pad-added)-> h264parse -> nvv4l2decoder
+    + 裸 H.264 (.h264/.264): filesrc -> h264parse -> nvv4l2decoder
+
+    args:
+    + path: str, 文件路径 (非 file:// URI)
+
+    out:
+    + video/x-raw(memory:NVMM)
+    """
+    args = args or {}
+    _path = args.get("path", path)
+    if not _path:
+        raise ValueError("acquire_filesrc_h264_bin requires path")
+
+    use_demux = _path.lower().endswith((".mp4", ".mov", ".m4v"))
+    bin_name = f"filesrc-h264-bin-{index:02}"
+
+    def _demux_pad_added_cb(demux_element, pad, h264parser):
+        name = pad.get_name()
+        if name.startswith("video/x-h264"):
+            sinkpad = h264parser.get_static_pad("sink")
+            if not sinkpad.is_linked():
+                pad.link(sinkpad)
+
+    cre_bin = Gst.Bin.new(bin_name)
+    if not cre_bin:
+        raise RuntimeError(f"Unable to create source bin {bin_name}")
+
+    source = Gst.ElementFactory.make("filesrc", f"filesrc-{index:02}")
+    if not source:
+        raise RuntimeError("Unable to create filesrc")
+    source.set_property("location", _path)
+
+    h264parser = Gst.ElementFactory.make("h264parse", f"h264parse-{index:02}")
+    if not h264parser:
+        raise RuntimeError("Unable to create h264parse")
+
+    decoder = Gst.ElementFactory.make("nvv4l2decoder", f"nvv4l2decoder-{index:02}")
+    if not decoder:
+        raise RuntimeError("Unable to create nvv4l2decoder")
+
+    cre_bin.add(source)
+    cre_bin.add(h264parser)
+    cre_bin.add(decoder)
+
+    if use_demux:
+        demux = Gst.ElementFactory.make("qtdemux", f"qtdemux-{index:02}")
+        if not demux:
+            raise RuntimeError("Unable to create qtdemux")
+        cre_bin.add(demux)
+        source.link(demux)
+        demux.connect("pad-added", _demux_pad_added_cb, h264parser)
+    else:
+        source.link(h264parser)
+
+    h264parser.link(decoder)
+
+    ghost_pad = Gst.GhostPad.new("src", decoder.get_static_pad("src"))
+    if not cre_bin.add_pad(ghost_pad):
+        raise RuntimeError(f"Failed to add ghost pad in {bin_name}")
 
     return cre_bin
 

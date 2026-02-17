@@ -95,6 +95,7 @@ def acquire_nvinfer(index: int = 0, args: dict = None):
     + config_file_path: Path to the TensorRT engine configuration file.
     + interval: Specifies number of consecutive batches to be skipped for inference. Default: 0-infer on erery frame
     + model_engine_file: Absolute path to the pre-generated serialized engine file for the model. default None
+    + input_tensor_meta: If 1, use preprocessed tensor from nvdspreprocess (ROI inference). If 0, nvinfer does full-frame inference. Required when using nvdspreprocess.
 
     Config priority (NVIDIA doc: Gst-nvinfer):
         GObject/set_property() OVERRIDE config file. Same key in both → code wins.
@@ -129,6 +130,10 @@ def acquire_nvinfer(index: int = 0, args: dict = None):
     if interval is not None:
         # interval may be 0, so use (interval is not None) to check
         pgie.set_property("interval", int(interval))
+
+    input_tensor_meta = args.get("input_tensor_meta", None)
+    if input_tensor_meta is not None:
+        pgie.set_property("input-tensor-meta", bool(input_tensor_meta))
 
     return pgie
 
