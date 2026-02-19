@@ -239,7 +239,6 @@ def scrfd_nvdsosd_sink_pad_buffer_probe(osd_sink_pad, info, u_data):
         frame_number = frame_meta.frame_num
         num_rects = frame_meta.num_obj_meta
         l_obj = frame_meta.obj_meta_list
-        face_embedings = []  # list of np.ndarray shape (512,) float32 's L2 norm
         while l_obj is not None:
             try:
                 # Casting l_obj.data to pyds.NvDsObjectMeta
@@ -249,19 +248,6 @@ def scrfd_nvdsosd_sink_pad_buffer_probe(osd_sink_pad, info, u_data):
             cid = obj_meta.class_id
             # 支持任一 class_id 计数 避免 key error
             obj_counter[cid] = obj_counter.get(cid, 0) + 1
-
-            # SGIE ArcFace, get 512d embedding
-            emb = get_arcface_embedding_from_obj(obj_meta, SGIE_ARCFACE_UNIQUE_ID)
-            if emb is not None:
-                norm = float(np.linalg.norm(emb))  # L2 norm
-                face_embedings.append(norm)
-                logger.debug(
-                    f"frame={frame_number} arcface_embedding dim={len(emb)} norm={norm} head3={emb[:3].tolist()}",
-                    # obj_meta.rect_params.left,
-                    # obj_meta.rect_params.top,
-                    # obj_meta.rect_params.width,
-                    # obj_meta.rect_params.height,
-                )
 
             try:
                 l_obj = l_obj.next
@@ -308,7 +294,6 @@ def scrfd_nvdsosd_sink_pad_buffer_probe(osd_sink_pad, info, u_data):
         if frame_number % 15 == 0:
             # logger.info(pyds.get_string(py_nvosd_text_params.display_text))
             logger.info(dt_str)
-            logger.info(f"face_embedings L2 norm: {face_embedings}")
 
         pyds.nvds_add_display_meta_to_frame(frame_meta, display_meta)
 
