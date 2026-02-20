@@ -172,9 +172,7 @@ def get_embedding():
     """
     from pathlib import Path
 
-    FACE_DB_DIR = (
-        "/home/good/wkspace/deepstream-sdk/deepstream_python_apps/faiss/face_db.txt"
-    )
+    FACE_DB_DIR = "/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/scripts/face_db.temp.txt"
     path = Path(FACE_DB_DIR)
     if not path.exists():
         raise FileNotFoundError(f"face_db not found: {path}")

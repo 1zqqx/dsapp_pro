@@ -61,7 +61,9 @@ def arcface_nvdsosd_sink_pad_buffer_probe(osd_sink_pad, info, u_data):
         frame_number = frame_meta.frame_num
         num_rects = frame_meta.num_obj_meta
         l_obj = frame_meta.obj_meta_list
-        face_embeddings = []  # list of np.ndarray (512,) float32，用于 FAISS search
+        # 收集有 embedding 的人脸对应的 obj_meta 与向量，用于 FAISS 后写回框内文字
+        face_embeddings = []
+        face_obj_metas = []
         while l_obj is not None:
             try:
                 # Casting l_obj.data to pyds.NvDsObjectMeta
@@ -69,16 +71,15 @@ def arcface_nvdsosd_sink_pad_buffer_probe(osd_sink_pad, info, u_data):
             except StopIteration:
                 break
             cid = obj_meta.class_id
-            # 支持任一 class_id 计数 避免 key error
             obj_counter[cid] = obj_counter.get(cid, 0) + 1
 
             # SGIE ArcFace, get 512d embedding
             emb = get_arcface_embedding_from_obj(obj_meta, SGIE_ARCFACE_UNIQUE_ID)
             if emb is not None:
-                # norm = float(np.linalg.norm(emb))  # L2 norm
+                face_obj_metas.append(obj_meta)
                 face_embeddings.append(emb)
                 logger.debug(
-                    f"frame={frame_number} arcface_embedding dim={len(emb)} norm={np.linalg.norm(emb)} head3={emb[:3].tolist()}",
+                    f"frame={frame_number} arcface_embedding dim={len(emb)} norm={np.linalg.norm(emb)}",
                     # obj_meta.rect_params.left,
                     # obj_meta.rect_params.top,
                     # obj_meta.rect_params.width,
@@ -90,13 +91,31 @@ def arcface_nvdsosd_sink_pad_buffer_probe(osd_sink_pad, info, u_data):
             except StopIteration:
                 break
 
-        # FAISS 匹配: u_data 为 IIndexFlatIP 实例（由 add_probe 的 user_data 传入）
+        # FAISS 匹配，拿到名字与置信度（余弦相似度）
         matched_names = []
+        matched_scores = []
         if face_embeddings and u_data is not None:
             try:
-                matched_names = u_data.search(face_embeddings)
+                matched_names, matched_scores = u_data.search_with_scores(
+                    face_embeddings
+                )
             except Exception as e:
                 logger.warning(f" faiss search failed: {e}")
+
+        # 每个检测到的人脸框左上角显示：名字 + 置信度(覆盖默认的 face/face_embedding)
+        for i, obj_meta in enumerate(face_obj_metas):
+            txt = obj_meta.text_params
+            if i < len(matched_names) and i < len(matched_scores):
+                name = matched_names[i]
+                score = matched_scores[i]
+                txt.display_text = f"{name} {score:.2f}"
+            else:
+                txt.display_text = "Unknown"
+            txt.font_params.font_name = "Serif"
+            txt.font_params.font_size = 15
+            txt.font_params.font_color.set(0.0, 1.0, 0.0, 1.0)  # 绿色
+            txt.set_bg_clr = 0
+            # txt.text_bg_clr.set(0.15, 0.15, 0.15, 0.85)  # 深灰半透明，替代纯黑
 
         # Acquiring a display meta object. The memory ownership remains in
         # the C code so downstream plugins can still access it. Otherwise

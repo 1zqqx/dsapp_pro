@@ -71,3 +71,35 @@ class IIndexFlatIP:
                     logger.info(f"FAISS no neighbor: idx={idx} -> Unknown")
                 result.append("Unknown")
         return result
+
+    def search_with_scores(
+        self, vectors: list[np.ndarray]
+    ) -> tuple[list[str], list[float]]:
+        """
+        与 search 相同, 但同时返回每个查询的相似度(余弦, [0,1]).
+
+        :return: (names, scores) 两个列表, 与输入向量一一对应
+        """
+        x = np.asarray(vectors, dtype=np.float32)
+        if x.ndim == 1:
+            x = x.reshape(1, -1)
+        F.normalize_L2(x)
+        D, I = self._INDEX.search(x, 1)
+        names_out = []
+        scores_out = []
+        for i in range(len(x)):
+            idx = int(I[i, 0])
+            sim = float(D[i, 0])
+            if idx >= 0 and sim >= self._th:
+                names_out.append(self._names[idx])
+                scores_out.append(sim)
+                continue
+            names_out.append("Unknown")
+            if idx >= 0:
+                logger.debug(
+                    f"FAISS match below threshold: sim={sim:.4f} < th={self._th:.2f} -> Unknown"
+                )
+                scores_out.append(sim)
+            else:
+                scores_out.append(0.0)
+        return names_out, scores_out
