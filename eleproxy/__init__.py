@@ -14,6 +14,8 @@ from .nvmidware import (
     acquire_nvdsosd,
 )
 
+from .nvmsgele import acquire_nvmsgbroker, acquire_nvmsgconv
+
 __all__ = [
     "acquire_v4l2_source_bin",
     "acquire_autovideosink",
@@ -27,4 +29,6 @@ __all__ = [
     "acquire_nvinfer",
     "acquire_nvvideoconvert",
     "acquire_nvdsosd",
+    "acquire_nvmsgconv",
+    "acquire_nvmsgbroker",
 ]
