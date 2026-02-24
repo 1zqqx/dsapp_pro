@@ -96,6 +96,9 @@ def acquire_nvmsgconv(index: int, args: dict = None):
     + config: str, path to msgconv config file.
     + payload_type: int, schema type (0=DeepStream, 257=PAYLOAD_CUSTOM for custom msg2p-lib).
     + msg2p_lib: str, absolute path to custom payload generator .so (when payload_type=257).
+    + msg2p_newapi: bool, if True use frame/object meta path (e.g. pass batch to custom lib). Default False.
+    + dummy_payload: bool, if True generate payload even when no NvDsEventMsgMeta on buffer. Default False.
+    + frame_interval: int, optional frame interval for payload generation (default 30).
 
     Returns:
     + Gst.Element: nvmsgconv instance.
@@ -111,4 +114,10 @@ def acquire_nvmsgconv(index: int, args: dict = None):
         el.set_property("payload-type", int(args["payload_type"]))
     if args.get("msg2p_lib") is not None:
         el.set_property("msg2p-lib", args["msg2p_lib"])
+    if args.get("msg2p_newapi") is not None:
+        el.set_property("msg2p-newapi", bool(args["msg2p_newapi"]))
+    if args.get("dummy_payload") is not None:
+        el.set_property("dummy-payload", bool(args["dummy_payload"]))
+    if args.get("frame_interval") is not None:
+        el.set_property("frame-interval", int(args["frame_interval"]))
     return el
