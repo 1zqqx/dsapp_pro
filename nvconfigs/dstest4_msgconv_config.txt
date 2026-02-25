@@ -22,3 +22,21 @@ id=CAMERA_ID
 location=45;45;45
 description="Entrance of Garage Right Lane"
 coordinate=5.2;10.1;11.2
+
+# nvmsgconv 按 source_id(如 0) 查找 place/sensor/analytics;
+# enable=0 的 group 不会被加入 map, 会报 No entry
+# 故 place0/analytics0 必须 enable=1 并带齐必需字段, 否则每帧都会打印上述警告
+[place0]
+enable=1
+id=0
+type=null
+name=default
+location=0;0;0
+coordinate=0;0;0
+
+[analytics0]
+enable=1
+id=default
+description=Face detection
+source=dsapp
+version=1.0

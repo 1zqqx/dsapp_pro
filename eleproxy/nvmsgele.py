@@ -98,6 +98,7 @@ def acquire_nvmsgconv(index: int, args: dict = None):
     + msg2p_lib: str, absolute path to custom payload generator .so (when payload_type=257).
     + msg2p_newapi: bool, True = use frame/object meta path (e.g. for NVDS_CUSTOM_MSG_BLOB).
     + dummy_payload: bool, True = generate payload even when no NvDsEventMsgMeta.
+    + frame_interval: int, generate payload every N frames (1=every frame). Default in plugin is 30.
 
     Returns:
     + Gst.Element: nvmsgconv instance.
@@ -117,4 +118,6 @@ def acquire_nvmsgconv(index: int, args: dict = None):
         el.set_property("msg2p-newapi", bool(args["msg2p_newapi"]))
     if args.get("dummy_payload") is not None:
         el.set_property("dummy-payload", bool(args["dummy_payload"]))
+    if args.get("frame_interval") is not None:
+        el.set_property("frame-interval", int(args["frame_interval"]))
     return el

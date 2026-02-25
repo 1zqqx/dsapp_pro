@@ -284,7 +284,8 @@ def nvsink_sink_pad_buffer_probe(osd_sink_pad, info, u_data):
                         f"sensorStr={pyds.get_string(ct_meta.sensorStr) if ct_meta.sensorStr else ''}"
                     )
 
-            # 方案3: 将本帧人脸 JSON 以 NVDS_CUSTOM_MSG_BLOB 挂到 frame, msg2p-newapi 时内置 payload 会带上
+            # 方案3: 将本帧人脸 JSON 以 NVDS_CUSTOM_MSG_BLOB 挂到 frame; msg2p-newapi 内置库会识别
+            # meta_type=NVDS_CUSTOM_MSG_BLOB 并写入 payload 的 "customMessage" 数组, 由 msgbroker 发到 Redis
             custom_json = json.dumps(face_payload_list, ensure_ascii=False)
             pyds.nvds_add_custom_msg_blob_to_frame(frame_meta, batch_meta, custom_json)
 
@@ -366,6 +367,7 @@ def main(uri):
                 "payload_type": 0,
                 "msg2p_newapi": True,
                 "dummy_payload": True,
+                "frame_interval": 10,
             },
         )
         msgbroker = acquire_nvmsgbroker(
@@ -375,7 +377,7 @@ def main(uri):
                 "conn_str": "127.0.0.1;6399",
                 "config": "/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/nvconfigs/dsapp_msgbroker_cfg_redis.txt",
                 "streamsize": 10000,  # Redis stream 最大长度, 在代码里 硬覆盖 配置文件中的 streamsize
-                "topic": "usb-camera-topic-3",
+                "topic": "usb-camera-topic-4",
                 "sync": False,
             },
         )
