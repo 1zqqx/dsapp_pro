@@ -1,0 +1,42 @@
+################################################################################
+# nvinfer 配置：Secondary GIE - FER+ 情绪识别（emotion-ferplus-8）
+################################################################################
+# 用途：对 PGIE（如 SCRFD）检测到的人脸做二次推理，输出 8 类情绪。
+# 模型输入：64x64 灰度。batch-size=4，需使用预构建的 b4 engine（nvinfer 自建会生成 b1，无效）。
+# 使用前：
+#   1. 运行 emotion_onnx_dynamic_batch.py 生成 emotion-ferplus-8_dynamic_batch.onnx
+#   2. 运行 apps/dsapp/scripts/build_emotion_engine_b4.sh 预构建 ..._b4_gpu0_fp16.engine
+#   3. 删掉 models.temp 下 *_b1_*.engine，避免误用
+################################################################################
+
+[property]
+gpu-id=0
+net-scale-factor=0.00392156862745098
+
+onnx-file=/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/models.temp/emotion-ferplus-8_dynamic_batch.onnx
+model-engine-file=/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/models.temp/emotion-ferplus-8_dynamic_batch.onnx_b4_gpu0_fp16.engine
+
+batch-size=4
+network-mode=2
+
+process-mode=2
+is-classifier=1
+
+operate-on-gie-id=1
+operate-on-class-ids=0
+
+gie-unique-id=3
+
+parse-classifier-func-name=NvDsInferParseCustomEmotion
+custom-lib-path=/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/libs/libnvdsinfer_custom_emotion.so
+
+labelfile-path=/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/nvconfigs/dsapp_emotion_labels.txt
+
+classifier-async-mode=0
+classifier-threshold=0.3
+
+# XXX 输出原始 tensor 到 metadata，供 Python OSD 按对象解析情绪（避免 C++ 解析器只收到 batch=1 导致所有人脸同结果）
+output-tensor-meta=1
+
+# FER+ 模型输入为 64x64 单通道灰度；0=RGB 1=BGR 2=GRAY
+model-color-format=2
