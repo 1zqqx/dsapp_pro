@@ -38,6 +38,9 @@ custom-lib-path=/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/ds
 # 输入为 RGB
 model-color-format=0
 
+# 不保持宽高比
+# maintain-aspect-ratio=0
+
 [class-attrs-all]
 pre-cluster-threshold=0.5
 topk=20
