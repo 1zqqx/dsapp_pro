@@ -15,6 +15,7 @@ from .nvmidware import (
 )
 
 from .nvmsgele import acquire_nvmsgbroker, acquire_nvmsgconv
+from .nvpreprocess import acquire_nvdspreprocess
 
 __all__ = [
     "acquire_v4l2_source_bin",
@@ -31,4 +32,5 @@ __all__ = [
     "acquire_nvdsosd",
     "acquire_nvmsgconv",
     "acquire_nvmsgbroker",
+    "acquire_nvdspreprocess",
 ]
