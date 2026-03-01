@@ -210,12 +210,31 @@ def acquire_filesrc_h264_bin(index: int = 0, path: str = "", args=None):
     use_demux = _path.lower().endswith((".mp4", ".mov", ".m4v"))
     bin_name = f"filesrc-h264-bin-{index:02}"
 
-    def _demux_pad_added_cb(demux_element, pad, h264parser):
-        name = pad.get_name()
+    def _demux_pad_added_cb(demux_element, pad, dec_parser):
+        pad_name = pad.get_name()
+        caps = pad.get_current_caps()
+        if not caps:
+            caps = pad.query_caps(None)
+
+        struct = caps.get_structure(0) if caps and caps.get_size() > 0 else None
+        # struct.get_name() -> str: 能力类型名，如 "video/x-h264"、"video/x-h265"
+        name = struct.get_name() if struct else ""
         if name.startswith("video/x-h264"):
-            sinkpad = h264parser.get_static_pad("sink")
-            if not sinkpad.is_linked():
+            logger.info(f" QtDemux video pad added: {pad_name}, linking to h264parser ")
+            sinkpad = dec_parser.get_static_pad("sink")
+            if sinkpad and not sinkpad.is_linked():
                 pad.link(sinkpad)
+            elif sinkpad and sinkpad.is_linked():
+                logger.error(" h264parser sink pad already linked")
+        elif name.startswith("video/x-h265"):
+            logger.info(f" QtDemux video pad added: {pad_name}, linking to h265parser ")
+            sinkpad = dec_parser.get_static_pad("sink")
+            if sinkpad and not sinkpad.is_linked():
+                pad.link(sinkpad)
+            elif sinkpad and sinkpad.is_linked():
+                logger.error(" h265parser sink pad already linked ")
+        elif name.startswith("audio"):
+            logger.info(" ignore audio ")
 
     cre_bin = Gst.Bin.new(bin_name)
     if not cre_bin:
