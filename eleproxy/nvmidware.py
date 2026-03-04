@@ -1,3 +1,5 @@
+import configparser
+
 import gi
 import logging
 
@@ -136,6 +138,42 @@ def acquire_nvinfer(index: int = 0, args: dict = None):
         pgie.set_property("input-tensor-meta", bool(input_tensor_meta))
 
     return pgie
+
+
+def acquire_nvtracker(index: int = 0, args: dict = None):
+    """
+    Create nvtracker instance for cross-frame object tracking.
+
+    nvtracker assigns a stable ``object_id`` to each detected object so that
+    downstream probes can correlate asynchronous results (e.g. FAISS matching)
+    back to the correct bounding box across frames.
+
+    args:
+    + config_file: Path to the nvtracker .txt config (INI format with a
+      [tracker] section that specifies tracker-width, tracker-height, gpu-id,
+      ll-lib-file, and ll-config-file).
+    """
+    args = args or {}
+    tracker = Gst.ElementFactory.make("nvtracker", f"nvtracker-{index:02d}")
+    if not tracker:
+        raise RuntimeError("Unable to create nvtracker")
+
+    config_file = args.get("config_file")
+    if config_file:
+        config = configparser.ConfigParser()
+        config.read(config_file)
+        for key in config["tracker"]:
+            if key == "ll-lib-file":
+                tracker.set_property("ll-lib-file", config.get("tracker", key))
+            elif key == "ll-config-file":
+                tracker.set_property("ll-config-file", config.get("tracker", key))
+            elif key == "gpu-id":
+                tracker.set_property("gpu_id", config.getint("tracker", key))
+            elif key == "tracker-width":
+                tracker.set_property("tracker-width", config.getint("tracker", key))
+            elif key == "tracker-height":
+                tracker.set_property("tracker-height", config.getint("tracker", key))
+    return tracker
 
 
 def acquire_nvvideoconvert(index: int = 0, args: dict = None):

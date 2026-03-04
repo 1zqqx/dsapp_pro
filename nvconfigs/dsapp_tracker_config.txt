@@ -1,0 +1,16 @@
+################################################################################
+# nvtracker 主配置 — 用于人脸跟踪，提供帧间稳定的 object_id
+#
+# NvDCF (Discriminative Correlation Filter) 算法:
+#   - 基于相关滤波的视觉跟踪，在检测器间隔帧仍可跟踪目标
+#   - 为同一人脸分配跨帧稳定的 object_id，供异步 FAISS 匹配缓存使用
+#
+# 必填属性: tracker-width, tracker-height, gpu-id, ll-lib-file, ll-config-file
+################################################################################
+
+[tracker]
+tracker-width=640
+tracker-height=384
+gpu-id=0
+ll-lib-file=/opt/nvidia/deepstream/deepstream/lib/libnvds_nvmultiobjecttracker.so
+ll-config-file=/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/nvconfigs/dsapp_config_tracker_NvDCF_perf.yml

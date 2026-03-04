@@ -1,0 +1,103 @@
+%YAML:1.0
+################################################################################
+# SPDX-FileCopyrightText: Copyright (c) 2020-2022 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+################################################################################
+
+# =============================================================================
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+################################################################################
+# NvDCF 低层跟踪库配置文件
+# 本文件由 ll-config-file 引用，供 libnvds_nvmultiobjecttracker.so 使用。
+# NvDCF (NVIDIA Discriminative Correlation Filter) 为基于相关滤波的视觉跟踪器，
+# 用于在检测器未输出时继续跟踪目标，以及关联跨帧的同一目标。
+# 配置块说明:
+#   BaseConfig         - 基础阈值
+#   TargetManagement   - 目标创建/终止策略
+#   TrajectoryManagement - 轨迹 ID 管理
+#   DataAssociator     - 检测框与轨迹的匹配（关联）规则
+#   StateEstimator     - 卡尔曼滤波状态估计
+#   VisualTracker      - NvDCF 视觉跟踪器参数
+# =============================================================================
+
+
+BaseConfig:
+  # minDetectorConfidence: 检测框置信度下限，低于此值的检测不参与跟踪
+  minDetectorConfidence: 0
+
+TargetManagement:
+  # enableBboxUnClipping: 1=若 bbox 被画面边缘裁切则尝试反裁切恢复
+  enableBboxUnClipping: 1
+  # maxTargetsPerStream: 每路流最多跟踪的目标数，含 shadow 模式。受显存限制
+  maxTargetsPerStream: 150
+
+  # [Creation & Termination Policy - 目标创建与终止策略]
+  # minIouDiff4NewTarget: 新检测与已有目标的 IOU 超过此值时，视为重复，不创建新目标
+  minIouDiff4NewTarget: 0.5
+  # minTrackerConfidence: 跟踪置信度低于此值则进入 shadow 模式（仅靠预测，不依赖检测）
+  minTrackerConfidence: 0.2
+  # probationAge: 目标需存活超过此帧数才被视为有效（避免短暂误检）
+  probationAge: 3
+  # maxShadowTrackingAge: shadow 模式最大持续帧数，超过则终止跟踪
+  maxShadowTrackingAge: 30
+  # earlyTerminationAge: TENTATIVE 期内 shadow 达到此帧数则提前终止
+  earlyTerminationAge: 1
+
+TrajectoryManagement:
+  # useUniqueID: 1=使用 64 位唯一 ID，0=使用较短 ID
+  useUniqueID: 0
+
+DataAssociator:
+  # dataAssociatorType: 数据关联器类型，0=DEFAULT
+  dataAssociatorType: 0
+  # associationMatcherType: 匹配算法，0=GREEDY 贪心, 1=GLOBAL 全局最优
+  associationMatcherType: 0
+  # checkClassMatch: 1=仅同类目标可关联（如车只与车匹配）
+  checkClassMatch: 1
+
+  # [Association Metric: Thresholds - 关联得分阈值]
+  minMatchingScore4Overall: 0.0
+  minMatchingScore4SizeSimilarity: 0.6   # bbox 尺寸相似度下限
+  minMatchingScore4Iou: 0.0              # IOU 得分下限
+  minMatchingScore4VisualSimilarity: 0.7 # 视觉相似度下限（NvDCF 响应）
+
+  # [Association Metric: Weights - 总得分的各分量权重]
+  matchingScoreWeight4VisualSimilarity: 0.6  # 视觉相似度权重
+  matchingScoreWeight4SizeSimilarity: 0.0
+  matchingScoreWeight4Iou: 0.4
+
+StateEstimator:
+  # stateEstimatorType: 0=DUMMY, 1=SIMPLE, 2=REGULAR（卡尔曼滤波）
+  stateEstimatorType: 1
+
+  # [Dynamics Modeling - 卡尔曼滤波过程/观测噪声]
+  processNoiseVar4Loc: 2.0      # 位置（中心）过程噪声
+  processNoiseVar4Size: 1.0     # 尺寸过程噪声
+  processNoiseVar4Vel: 0.1      # 速度过程噪声
+  measurementNoiseVar4Detector: 4.0   # 检测器观测噪声
+  measurementNoiseVar4Tracker: 16.0   # 跟踪器观测噪声
+
+VisualTracker:
+  # visualTrackerType: 0=DUMMY, 1=NvDCF
+  visualTrackerType: 1
+
+  # [NvDCF: Feature Extraction - 特征提取]
+  useColorNames: 1     # 1=使用 ColorNames 颜色特征
+  useHog: 0            # 1=使用 HOG 梯度特征（增加计算量）
+  featureImgSizeLevel: 2   # 特征图尺度 1~5，越小越快、精度略降
+  featureFocusOffsetFactor_y: -0.2  # Hanning 窗中心垂直偏移系数
+
+  # [NvDCF: Correlation Filter - 相关滤波器]
+  filterLr: 0.075              # 滤波器学习率，越大适应越快、易过拟合
+  filterChannelWeightsLr: 0.1  # 通道权重学习率
+  gaussianSigma: 0.75          # 期望响应高斯标准差（像素）

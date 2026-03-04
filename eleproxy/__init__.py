@@ -10,6 +10,7 @@ from .middleware import get_queue
 from .nvmidware import (
     acquire_nvstreammux,
     acquire_nvinfer,
+    acquire_nvtracker,
     acquire_nvvideoconvert,
     acquire_nvdsosd,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "get_queue",
     "acquire_nvstreammux",
     "acquire_nvinfer",
+    "acquire_nvtracker",
     "acquire_nvvideoconvert",
     "acquire_nvdsosd",
     "acquire_nvmsgconv",
