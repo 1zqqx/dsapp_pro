@@ -17,6 +17,7 @@ from .nvmidware import (
 
 from .nvmsgele import acquire_nvmsgbroker, acquire_nvmsgconv
 from .nvpreprocess import acquire_nvdspreprocess
+from .rtspclient import get_rtsp_client_bin
 
 __all__ = [
     "acquire_v4l2_source_bin",
@@ -35,4 +36,5 @@ __all__ = [
     "acquire_nvmsgconv",
     "acquire_nvmsgbroker",
     "acquire_nvdspreprocess",
+    "get_rtsp_client_bin",
 ]
