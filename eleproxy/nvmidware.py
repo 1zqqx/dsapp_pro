@@ -67,6 +67,22 @@ def acquire_nvstreammux(index: int = 0, args: dict = None):
     return streammux
 
 
+def acquire_nvstreamdemux(args: dict = None):
+    """
+    Create nvstreamdemux instance to 1-to-N pipes stream demultiplexing
+
+    args:
+    + index: int, defaule 0, plugin id
+    """
+
+    args = args or {}
+    index: int = args.get("index", 0)
+    demux = Gst.ElementFactory.make("nvstreamdemux", f"nvstreamdemux-{index:02d}")
+    if not demux:
+        raise RuntimeError(" Unable to create nvstreamdemux ")
+    return demux
+
+
 def acquire_nvinfer(index: int = 0, args: dict = None):
     """
     Create primary nvinfer instance to perform inference.

@@ -9,6 +9,7 @@ from .sumup import acquire_pipeline
 from .middleware import get_queue
 from .nvmidware import (
     acquire_nvstreammux,
+    acquire_nvstreamdemux,
     acquire_nvinfer,
     acquire_nvtracker,
     acquire_nvvideoconvert,
@@ -29,6 +30,7 @@ __all__ = [
     "acquire_filesrc_h264_bin",
     "get_queue",
     "acquire_nvstreammux",
+    "acquire_nvstreamdemux",
     "acquire_nvinfer",
     "acquire_nvtracker",
     "acquire_nvvideoconvert",
