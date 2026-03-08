@@ -3,8 +3,9 @@ import logging
 import numpy as np
 import faiss as F
 
+from logger.get_logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class IIndexFlatL2:
@@ -61,12 +62,12 @@ class IIndexFlatL2:
                 result.append(self._names[idx])
             else:
                 if idx >= 0:
-                    logger.info(
+                    logger.debug(
                         f"FAISS match below threshold: sim={sim:.4f} < th={self._th:.2f}"
                         f" -> Unknown (nearest was {self._names[idx]})",
                     )
                 else:
-                    logger.info(f"FAISS no neighbor: idx={idx} -> Unknown")
+                    logger.debug(f"FAISS no neighbor: idx={idx} -> Unknown")
                 result.append("Unknown")
         return result
 

@@ -126,10 +126,15 @@ custom-input-transformation-function=CustomAsyncTransformation
 # 1=在预定义 ROI 上处理, 0=在全帧上处理
 process-on-roi=1
 
-# roi-params-src-<id>: 指定源 <id> 的 ROI 坐标
+# roi-params-src-<N>: 指定“源 N”的 ROI 坐标。N 与视频流的对应关系：
+#   N = nvstreammux 的 sink pad 序号（sink_0 → N=0，sink_1 → N=1）。
+#   下游 frame_meta.source_id 与 N 一致。
+# 固定槽位：若希望某路流断线重连后仍使用同一 ROI 配置，在应用层为该路配置
+# mux_slot=N（见 FaceRecognitionPipeline 的 sources[].mux_slot），则该路始终占用
+# sink_N，即始终使用本文件中的 roi-params-src-N。
 # 格式：每个 ROI 为 left;top;width;height，多个 ROI 用分号连接
 # 例如 0;540;900;500 表示 左上角(0,540)，宽900，高500
-# 本例源 2 个 ROI：ROI1(0,540,900,500) ROI2(960,0,900,500) ROI3(0,0,540,900)
 # 所有源的总 ROI 数不得超过 network-input-shape 的批次维度
 roi-params-src-0=800;250;640;640;1900;300;640;640
+roi-params-src-1=800;250;640;640;1900;300;640;640
 # roi-params-src-1=0;0;640;640

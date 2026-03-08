@@ -29,19 +29,24 @@ class MatchResult:
     frame_number: int  # frame at which the match was computed
 
 
+def _cache_key(source_id: int, object_id: int) -> tuple[int, int]:
+    """Cache key for per-stream face match; avoids cross-stream collision."""
+    return (source_id, object_id)
+
+
 class AsyncFaissMatcher:
     """
     Offloads FAISS search from the GStreamer streaming thread to a background
-    worker, caching results by *object_id* (from nvtracker) so that the probe
-    callback never blocks the pipeline.
+    worker, caching results by *(source_id, object_id)* so that the probe
+    callback never blocks the pipeline and results do not cross streams.
 
     Typical usage inside a pad probe:
 
         # 1. check if result already cached
-        cached = matcher.get_result(obj_meta.object_id)
+        cached = matcher.get_result(frame_meta.source_id, obj_meta.object_id)
 
         # 2. submit only when needed (new face or stale cache)
-        if matcher.needs_submit(obj_meta.object_id, frame_number):
+        if matcher.needs_submit(frame_meta.source_id, obj_meta.object_id, frame_number):
             matcher.submit(FaissTask(...))
 
         # 3. periodically clean up departed faces
@@ -64,7 +69,9 @@ class AsyncFaissMatcher:
         """
         self._index = faiss_index
         self._queue: queue.Queue[FaissTask] = queue.Queue(maxsize=max_queue_size)
-        self._cache: dict[int, MatchResult] = {}  # object_id -> MatchResult
+        self._cache: dict[tuple[int, int], MatchResult] = (
+            {}
+        )  # (source_id, object_id) -> MatchResult
         self._lock = threading.Lock()
         self._stale_frames = stale_frames
         self._refresh_interval = refresh_interval
@@ -92,14 +99,14 @@ class AsyncFaissMatcher:
         except queue.Full:
             return False
 
-    def get_result(self, object_id: int) -> MatchResult | None:
+    def get_result(self, source_id: int, object_id: int) -> MatchResult | None:
         with self._lock:
-            return self._cache.get(object_id)
+            return self._cache.get(_cache_key(source_id, object_id))
 
-    def needs_submit(self, object_id: int, current_frame: int) -> bool:
-        """True when *object_id* has no cached result or the cache is stale."""
+    def needs_submit(self, source_id: int, object_id: int, current_frame: int) -> bool:
+        """True when (source_id, object_id) has no cached result or the cache is stale."""
         with self._lock:
-            cached = self._cache.get(object_id)
+            cached = self._cache.get(_cache_key(source_id, object_id))
             if cached is None:
                 return True
             return (current_frame - cached.frame_number) > self._refresh_interval
@@ -107,18 +114,18 @@ class AsyncFaissMatcher:
     def cleanup(self, current_frame: int) -> int:
         """Remove cache entries older than *stale_frames*.  Returns count removed."""
         with self._lock:
-            stale_ids = [
-                oid
-                for oid, r in self._cache.items()
+            stale_keys = [
+                key
+                for key, r in self._cache.items()
                 if (current_frame - r.frame_number) > self._stale_frames
             ]
-            for oid in stale_ids:
-                del self._cache[oid]
-            if stale_ids:
+            for key in stale_keys:
+                del self._cache[key]
+            if stale_keys:
                 logger.debug(
-                    "AsyncFaissMatcher: cleaned %d stale entries", len(stale_ids)
+                    "AsyncFaissMatcher: cleaned %d stale entries", len(stale_keys)
                 )
-            return len(stale_ids)
+            return len(stale_keys)
 
     def stop(self):
         self._running = False
@@ -142,6 +149,6 @@ class AsyncFaissMatcher:
                 score = scores[0] if scores else 0.0
                 result = MatchResult(name, score, task.frame_number)
                 with self._lock:
-                    self._cache[task.object_id] = result
+                    self._cache[_cache_key(task.source_id, task.object_id)] = result
             except Exception as e:
                 logger.warning("AsyncFaissMatcher search error: %s", e)

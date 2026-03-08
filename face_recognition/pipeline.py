@@ -27,18 +27,9 @@ from .types import SourceConfig, SourceRecord
 from .inference_chain import InferenceChain
 from .stream_branch import StreamBranch
 from .message_branch import MessageBranch
-from .probe import (
-    FaceProbe,
-    _demux_sink_probe_readonly,
-    _branch_queue_sink_probe_readonly,
-    _infer_src_probe_readonly,
-    _pgie_sink_probe_readonly,
-)
+from .probe import FaceProbe
 
 logger = get_logger(__name__)
-
-# DEBUG_NO_BBOX 步骤2: 设为 True 时在 demux sink 与 branch0 queue sink 挂只读 probe
-_DEBUG_STEP2_ATTACH_PROBES = True
 
 
 class FaceRecognitionPipeline:
@@ -82,25 +73,6 @@ class FaceRecognitionPipeline:
         )
         infer_post_tee = self._inference_chain.build()
 
-        if _DEBUG_STEP2_ATTACH_PROBES:
-            pgie_sink = self._inference_chain.pgie.get_static_pad("sink")
-            if pgie_sink:
-                pgie_sink.add_probe(
-                    Gst.PadProbeType.BUFFER,
-                    _pgie_sink_probe_readonly,
-                    {"counter": 0},
-                )
-                logger.info("[DEBUG step2] probe attached to pgie sink pad")
-            for tag, el in (("pgie", self._inference_chain.pgie), ("sgie", self._inference_chain.sgie)):
-                src_pad = el.get_static_pad("src")
-                if src_pad:
-                    src_pad.add_probe(
-                        Gst.PadProbeType.BUFFER,
-                        _infer_src_probe_readonly,
-                        {"name": tag, "counter": 0},
-                    )
-                    logger.info("[DEBUG step2] probe attached to %s src pad", tag)
-
         msg_cfg = self._config.get("message", None)
         if msg_cfg:
             msg_branch = MessageBranch(self._pipeline, infer_post_tee, msg_cfg)
@@ -120,16 +92,6 @@ class FaceRecognitionPipeline:
             raise RuntimeError(f"Failed to link infer_post_tee → demux queue: {ret}")
         demux_queue.link(self._demux)
 
-        if _DEBUG_STEP2_ATTACH_PROBES:
-            demux_sink_pad = self._demux.get_static_pad("sink")
-            if demux_sink_pad:
-                demux_sink_pad.add_probe(
-                    Gst.PadProbeType.BUFFER,
-                    _demux_sink_probe_readonly,
-                    {"counter": 0},
-                )
-                logger.info("[DEBUG step2] probe attached to demux sink pad")
-
         stream_ids: list[str] = []
         for src_dict in self._config.get("sources", []):
             src_cfg = SourceConfig(
@@ -137,28 +99,23 @@ class FaceRecognitionPipeline:
                 source_id=src_dict.get("source_id", ""),
                 latency=src_dict.get("latency", 300),
                 rtsp_output=src_dict.get("rtsp_output"),
+                mux_slot=src_dict.get("mux_slot"),
             )
-            record = self._add_source_internal(src_cfg)
-            stream_ids.append(src_cfg.source_id or src_cfg.uri)
+            self._add_source_internal(src_cfg)
 
-        n_sources = len(self._sources)
+        # stream_ids[i] = label for source_id i (sink_i)，与 preprocess roi-params-src-N 的 N 对应
+        max_pad = max(self._sources.keys()) if self._sources else -1
+        stream_ids = [""] * (max_pad + 1)
+        for idx, rec in self._sources.items():
+            stream_ids[idx] = rec.config.source_id or rec.config.uri
+
+        # n_sources = len(self._sources)
+        # HACK nvinfer 的batch-size 不小于 nvdspreprocess 的输出 batch
+        n_sources = 4
         if n_sources > 0:
             self._inference_chain.update_batch_size(n_sources)
 
-        if _DEBUG_STEP2_ATTACH_PROBES and self._sources:
-            first_record = self._sources.get(0)
-            if first_record is not None and first_record.branch is not None:
-                branch_queue_sink = first_record.branch.get_queue_sink_pad()
-                if branch_queue_sink:
-                    branch_queue_sink.add_probe(
-                        Gst.PadProbeType.BUFFER,
-                        _branch_queue_sink_probe_readonly,
-                        {"counter": 0, "branch_idx": 0},
-                    )
-                    logger.info(
-                        "[DEBUG step2] probe attached to branch0 queue sink pad"
-                    )
-
+        # XXX
         self._probe = FaceProbe(
             self._config.get("faiss"),
             stream_ids=stream_ids,
@@ -174,7 +131,12 @@ class FaceRecognitionPipeline:
     # ------------------------------------------------------------------
 
     def add_source(self, source_cfg: dict) -> int:
-        """Add a source at runtime.  Returns the assigned ``pad_index``."""
+        """Add a source at runtime.  Returns the assigned ``pad_index``.
+
+        If ``source_cfg`` includes ``mux_slot`` (e.g. 0 or 1), that stream is
+        pinned to sink_<mux_slot> so preprocess ``roi-params-src-<mux_slot>``
+        always applies; useful when a stream reconnects and should keep the
+        same ROI config."""
         result: dict = {}
         done = threading.Event()
         GLib.idle_add(self._do_add_source, source_cfg, result, done)
@@ -250,9 +212,17 @@ class FaceRecognitionPipeline:
 
     def _add_source_internal(self, src_cfg: SourceConfig) -> SourceRecord:
         """Add a source synchronously — used both at build time and from
-        ``_do_add_source``."""
-        pad_index = self._next_pad_index
-        self._next_pad_index += 1
+        ``_do_add_source``. If ``src_cfg.mux_slot`` is set, that stream is
+        pinned to sink_<mux_slot> (preprocess roi-params-src-<N> N = mux_slot)."""
+        if src_cfg.mux_slot is not None:
+            pad_index = src_cfg.mux_slot
+            if pad_index in self._sources:
+                raise RuntimeError(
+                    f"mux_slot {pad_index} already in use; remove that source first"
+                )
+        else:
+            pad_index = self._next_pad_index
+            self._next_pad_index += 1
 
         src_bin = acquire_nvurisrcbin(
             index=pad_index,
@@ -299,6 +269,7 @@ class FaceRecognitionPipeline:
                 source_id=source_cfg_dict.get("source_id", ""),
                 latency=source_cfg_dict.get("latency", 300),
                 rtsp_output=source_cfg_dict.get("rtsp_output"),
+                mux_slot=source_cfg_dict.get("mux_slot"),
             )
             record = self._add_source_internal(src_cfg)
 
@@ -307,13 +278,16 @@ class FaceRecognitionPipeline:
                 for el in record.branch._elements:
                     el.sync_state_with_parent()
 
-            n = len(self._sources)
+            # HACK
+            # n = len(self._sources)
+            n = 4
             self._inference_chain.update_batch_size(n)
 
             if self._probe is not None:
-                ids = [
-                    r.config.source_id or r.config.uri for r in self._sources.values()
-                ]
+                max_pad = max(self._sources.keys())
+                ids = [""] * (max_pad + 1)
+                for idx, r in self._sources.items():
+                    ids[idx] = r.config.source_id or r.config.uri
                 self._probe.update_stream_ids(ids)
 
             result["pad_index"] = record.pad_index
@@ -367,7 +341,9 @@ class FaceRecognitionPipeline:
         record.src_bin.set_state(Gst.State.NULL)
         self._pipeline.remove(record.src_bin)
 
-        n = len(self._sources)
+        # HACK
+        # n = len(self._sources)
+        n = 4
         if n > 0:
             self._inference_chain.update_batch_size(n)
 

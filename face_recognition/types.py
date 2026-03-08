@@ -21,6 +21,9 @@ class SourceConfig:
     # TODO ?
     latency: int = 300
     rtsp_output: dict | None = None
+    # 固定 mux 槽位：指定时该路始终使用 sink_<mux_slot>，与 preprocess roi-params-src-<N> 的 N 一致；
+    # 断线重连后仍用同一槽位，preprocess 配置无需随添加顺序变化。
+    mux_slot: int | None = None
 
 
 @dataclass

@@ -91,222 +91,6 @@ def get_arcface_embedding_from_obj(
     return None
 
 
-# DEBUG_NO_BBOX 步骤2: 只读 probe 每 N 个 buffer 打一次 log，避免刷屏
-_DEBUG_STEP2_LOG_INTERVAL = 30
-
-
-def _demux_sink_probe_readonly(pad, info, u_data):
-    """DEBUG 步骤2: nvstreamdemux sink 只读 probe，确认进入 demux 的 buffer 是否有 batch_meta 和 obj_meta。"""
-    gst_buffer = info.get_buffer()
-    if not gst_buffer:
-        return Gst.PadProbeReturn.OK
-    batch_meta = pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
-    if batch_meta is None:
-        u_data["counter"] = u_data.get("counter", 0) + 1
-        if u_data["counter"] % _DEBUG_STEP2_LOG_INTERVAL == 1:
-            logger.warning("[DEBUG step2] demux sink: batch_meta is None")
-        return Gst.PadProbeReturn.OK
-
-    u_data["counter"] = u_data.get("counter", 0) + 1
-    if u_data["counter"] % _DEBUG_STEP2_LOG_INTERVAL != 1:
-        return Gst.PadProbeReturn.OK
-
-    n_frames = 0
-    per_frame_objs = []
-    pyds.nvds_acquire_meta_lock(batch_meta)
-    try:
-        l_frame = batch_meta.frame_meta_list
-        while l_frame is not None:
-            try:
-                frame_meta = pyds.NvDsFrameMeta.cast(l_frame.data)
-            except StopIteration:
-                break
-            n_frames += 1
-            n_obj = 0
-            l_obj = frame_meta.obj_meta_list
-            while l_obj is not None:
-                try:
-                    pyds.NvDsObjectMeta.cast(l_obj.data)
-                    n_obj += 1
-                except StopIteration:
-                    break
-                try:
-                    l_obj = l_obj.next
-                except StopIteration:
-                    break
-            per_frame_objs.append(n_obj)
-            try:
-                l_frame = l_frame.next
-            except StopIteration:
-                break
-    finally:
-        pyds.nvds_release_meta_lock(batch_meta)
-    logger.info(
-        "[DEBUG step2] demux sink: n_frames=%d per_frame_objs=%s",
-        n_frames,
-        per_frame_objs,
-    )
-    return Gst.PadProbeReturn.OK
-
-
-def _branch_queue_sink_probe_readonly(pad, info, u_data):
-    """DEBUG 步骤2: StreamBranch queue sink 只读 probe，确认 demux 出口 buffer 是否仍有 batch_meta/obj_meta。"""
-    gst_buffer = info.get_buffer()
-    if not gst_buffer:
-        return Gst.PadProbeReturn.OK
-    batch_meta = pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
-    if batch_meta is None:
-        u_data["counter"] = u_data.get("counter", 0) + 1
-        if u_data["counter"] % _DEBUG_STEP2_LOG_INTERVAL == 1:
-            logger.warning(
-                "[DEBUG step2] branch%d queue sink: batch_meta is None",
-                u_data.get("branch_idx", -1),
-            )
-        return Gst.PadProbeReturn.OK
-
-    u_data["counter"] = u_data.get("counter", 0) + 1
-    if u_data["counter"] % _DEBUG_STEP2_LOG_INTERVAL != 1:
-        return Gst.PadProbeReturn.OK
-
-    n_frames = 0
-    per_frame_objs = []
-    pyds.nvds_acquire_meta_lock(batch_meta)
-    try:
-        l_frame = batch_meta.frame_meta_list
-        while l_frame is not None:
-            try:
-                frame_meta = pyds.NvDsFrameMeta.cast(l_frame.data)
-            except StopIteration:
-                break
-            n_frames += 1
-            n_obj = 0
-            l_obj = frame_meta.obj_meta_list
-            while l_obj is not None:
-                try:
-                    pyds.NvDsObjectMeta.cast(l_obj.data)
-                    n_obj += 1
-                except StopIteration:
-                    break
-                try:
-                    l_obj = l_obj.next
-                except StopIteration:
-                    break
-            per_frame_objs.append(n_obj)
-            try:
-                l_frame = l_frame.next
-            except StopIteration:
-                break
-    finally:
-        pyds.nvds_release_meta_lock(batch_meta)
-    logger.info(
-        "[DEBUG step2] branch%d queue sink: n_frames=%d per_frame_objs=%s",
-        u_data.get("branch_idx", -1),
-        n_frames,
-        per_frame_objs,
-    )
-    return Gst.PadProbeReturn.OK
-
-
-def _infer_src_probe_readonly(pad, info, u_data):
-    """DEBUG 步骤2 延伸: pgie/sgie src 只读 probe，确认 nvinfer 是否输出 obj_meta。"""
-    gst_buffer = info.get_buffer()
-    if not gst_buffer:
-        return Gst.PadProbeReturn.OK
-    batch_meta = pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
-    name = u_data.get("name", "infer")
-    if batch_meta is None:
-        u_data["counter"] = u_data.get("counter", 0) + 1
-        if u_data["counter"] % _DEBUG_STEP2_LOG_INTERVAL == 1:
-            logger.warning("[DEBUG step2] %s src: batch_meta is None", name)
-        return Gst.PadProbeReturn.OK
-
-    u_data["counter"] = u_data.get("counter", 0) + 1
-    if u_data["counter"] % _DEBUG_STEP2_LOG_INTERVAL != 1:
-        return Gst.PadProbeReturn.OK
-
-    n_frames = 0
-    per_frame_objs = []
-    pyds.nvds_acquire_meta_lock(batch_meta)
-    try:
-        l_frame = batch_meta.frame_meta_list
-        while l_frame is not None:
-            try:
-                frame_meta = pyds.NvDsFrameMeta.cast(l_frame.data)
-            except StopIteration:
-                break
-            n_frames += 1
-            n_obj = 0
-            l_obj = frame_meta.obj_meta_list
-            while l_obj is not None:
-                try:
-                    pyds.NvDsObjectMeta.cast(l_obj.data)
-                    n_obj += 1
-                except StopIteration:
-                    break
-                try:
-                    l_obj = l_obj.next
-                except StopIteration:
-                    break
-            per_frame_objs.append(n_obj)
-            try:
-                l_frame = l_frame.next
-            except StopIteration:
-                break
-    finally:
-        pyds.nvds_release_meta_lock(batch_meta)
-    logger.info(
-        "[DEBUG step2] %s src: n_frames=%d per_frame_objs=%s",
-        name,
-        n_frames,
-        per_frame_objs,
-    )
-    return Gst.PadProbeReturn.OK
-
-
-def _pgie_sink_probe_readonly(pad, info, u_data):
-    """DEBUG: PGIE sink 只读 probe，确认进入 PGIE 的输入是否有 batch_meta、帧数与尺寸。"""
-    gst_buffer = info.get_buffer()
-    if not gst_buffer:
-        return Gst.PadProbeReturn.OK
-    batch_meta = pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
-    if batch_meta is None:
-        u_data["counter"] = u_data.get("counter", 0) + 1
-        if u_data["counter"] % _DEBUG_STEP2_LOG_INTERVAL == 1:
-            logger.warning("[DEBUG step2] pgie sink: batch_meta is None")
-        return Gst.PadProbeReturn.OK
-
-    u_data["counter"] = u_data.get("counter", 0) + 1
-    if u_data["counter"] % _DEBUG_STEP2_LOG_INTERVAL != 1:
-        return Gst.PadProbeReturn.OK
-
-    n_frames = 0
-    frame_info = []
-    pyds.nvds_acquire_meta_lock(batch_meta)
-    try:
-        l_frame = batch_meta.frame_meta_list
-        while l_frame is not None:
-            try:
-                frame_meta = pyds.NvDsFrameMeta.cast(l_frame.data)
-            except StopIteration:
-                break
-            n_frames += 1
-            frame_info.append(
-                (frame_meta.source_frame_width, frame_meta.source_frame_height)
-            )
-            try:
-                l_frame = l_frame.next
-            except StopIteration:
-                break
-    finally:
-        pyds.nvds_release_meta_lock(batch_meta)
-    logger.info(
-        "[DEBUG step2] pgie sink: n_frames=%d frame_wh=%s",
-        n_frames,
-        frame_info,
-    )
-    return Gst.PadProbeReturn.OK
-
-
 def _batch_buffer_probe(pad, info, u_data):
     """Tee sink-pad buffer probe — async FAISS face matching.
 
@@ -327,9 +111,6 @@ def _batch_buffer_probe(pad, info, u_data):
         logger.warning("Unable to get GstBuffer")
         return Gst.PadProbeReturn.OK
 
-    # async_matcher: AsyncFaissMatcher | None = u_data.get("async_matcher")
-    # stream_ids: list[str] = u_data.get("stream_ids", [])
-
     batch_meta = pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
     if batch_meta is None:
         logger.warning("Unable to get batch meta from GstBuffer")
@@ -344,6 +125,7 @@ def _batch_buffer_probe(pad, info, u_data):
         return f"source_{sid}"
 
     pyds.nvds_acquire_meta_lock(batch_meta)
+    # batch_meta → frame_meta_list → frame_meta.obj_meta_list → obj_meta
     try:
         l_frame = batch_meta.frame_meta_list
         while l_frame is not None:
@@ -374,7 +156,7 @@ def _batch_buffer_probe(pad, info, u_data):
                 cached = None
 
                 if async_matcher is not None:
-                    cached = async_matcher.get_result(object_id)
+                    cached = async_matcher.get_result(source_id, object_id)
                     if cached is not None:
                         txt = obj_meta.text_params
                         txt.display_text = f"{cached.name}-{cached.score:.2f}"
@@ -383,7 +165,7 @@ def _batch_buffer_probe(pad, info, u_data):
                         txt.font_params.font_color.set(0.0, 1.0, 0.0, 1.0)
                         txt.set_bg_clr = 0
 
-                    if async_matcher.needs_submit(object_id, frame_number):
+                    if async_matcher.needs_submit(source_id, object_id, frame_number):
                         emb = get_arcface_embedding_from_obj(
                             obj_meta, SGIE_ARCFACE_UNIQUE_ID
                         )
@@ -409,6 +191,7 @@ def _batch_buffer_probe(pad, info, u_data):
                     l_obj = l_obj.next
                 except StopIteration:
                     break
+                # end of l_obj
 
             if face_results:
                 payload = {
@@ -436,6 +219,7 @@ def _batch_buffer_probe(pad, info, u_data):
                 l_frame = l_frame.next
             except StopIteration:
                 break
+            # end of l_frame
     finally:
         pyds.nvds_release_meta_lock(batch_meta)
 
@@ -472,7 +256,7 @@ class FaceProbe:
         sink_pad.add_probe(
             Gst.PadProbeType.BUFFER, _batch_buffer_probe, probe_user_data
         )
-        logger.info("FaceProbe attached (matcher=%s)", self._async_matcher is not None)
+        logger.info(f"FaceProbe attached (matcher={self._async_matcher is not None})")
 
     def update_stream_ids(self, stream_ids: list[str]):
         self._stream_ids[:] = stream_ids
