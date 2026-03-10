@@ -110,6 +110,11 @@ class InferenceChain:
         self._nvtracker.link(self._sgie)
         self._sgie.link(self._tee)
 
+        # from .deprobe import DeProbe
+
+        # self._debug_pgie_sink_probe = DeProbe()
+        # self._debug_pgie_sink_probe.attach(self._nvtracker)
+
         logger.info("InferenceChain built")
         return self._tee
 

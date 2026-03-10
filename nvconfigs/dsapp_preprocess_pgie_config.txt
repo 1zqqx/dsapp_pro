@@ -88,7 +88,7 @@ scaling-filter=0
 
 # custom-lib-path: 自定义 preprocess 库 .so 文件的路径
 # 用于提供自定义的转换和张量准备函数
-custom-lib-path=/opt/nvidia/deepstream/deepstream/lib/gst-plugins/libcustom2d_preprocess.so
+custom-lib-path=/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/libs/libcustom2d_preprocess.so
 # custom-tensor-preparation-function: 自定义库中张量准备函数的名称
 # 该函数将已转换的 ROI/全帧数据准备成推理所需的原始张量
 custom-tensor-preparation-function=CustomTensorPreparation
@@ -119,8 +119,9 @@ pixel-normalization-factor=0.003921568
 src-ids=0;1
 
 # custom-input-transformation-function: 自定义库中的输入转换函数名
-# 用于对每组流执行自定义转换（如缩放、格式转换等）
-custom-input-transformation-function=CustomAsyncTransformation
+# 用于对每组流执行自定义转换（如缩放、格式转换等）CustomAsyncTransformation 异步版本的 Transformation 会准备好一个 ROI 就送出去
+# custom-input-transformation-function=CustomAsyncTransformation 
+custom-input-transformation-function=CustomTransformation
 
 # process-on-roi: 是否在 ROI 上处理（若 process-on-frame 禁用则忽略）
 # 1=在预定义 ROI 上处理, 0=在全帧上处理

@@ -109,13 +109,8 @@ class FaceRecognitionPipeline:
         for idx, rec in self._sources.items():
             stream_ids[idx] = rec.config.source_id or rec.config.uri
 
-        # n_sources = len(self._sources)
-        # HACK nvinfer 的batch-size 不小于 nvdspreprocess 的输出 batch
-        n_sources = 4
-        if n_sources > 0:
-            self._inference_chain.update_batch_size(n_sources)
+        # XXX nvinfer 的 batch-size 不小于 nvdspreprocess 的输出 batch
 
-        # XXX
         self._probe = FaceProbe(
             self._config.get("faiss"),
             stream_ids=stream_ids,
@@ -123,7 +118,7 @@ class FaceRecognitionPipeline:
         self._probe.attach(infer_post_tee)
 
         logger.info(
-            "FaceRecognitionPipeline built with %d initial source(s)", n_sources
+            f"FaceRecognitionPipeline built with {len(stream_ids)} initial source(s)"
         )
 
     # ------------------------------------------------------------------
@@ -278,10 +273,8 @@ class FaceRecognitionPipeline:
                 for el in record.branch._elements:
                     el.sync_state_with_parent()
 
-            # HACK
-            # n = len(self._sources)
-            n = 4
-            self._inference_chain.update_batch_size(n)
+            # XXX
+            # self._inference_chain.update_batch_size(n)
 
             if self._probe is not None:
                 max_pad = max(self._sources.keys())
@@ -341,11 +334,8 @@ class FaceRecognitionPipeline:
         record.src_bin.set_state(Gst.State.NULL)
         self._pipeline.remove(record.src_bin)
 
-        # HACK
-        # n = len(self._sources)
-        n = 4
-        if n > 0:
-            self._inference_chain.update_batch_size(n)
+        # XXX
+        # self._inference_chain.update_batch_size(n)
 
         if self._probe is not None:
             ids = [r.config.source_id or r.config.uri for r in self._sources.values()]
