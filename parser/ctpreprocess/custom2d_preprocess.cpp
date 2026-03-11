@@ -20,10 +20,13 @@
 #include <nvdspreprocess_interface.h>
 #include <nvdspreprocess_meta.h>
 
+// 插件 gstnvdspreprocess.cpp:509 要求 initLib 必须返回非空，否则报 "Error while initializing Custom Library"。
+// 插件只把 ctx 透传给 CustomTensorPreparation 和 deInitLib，从不解引用，故用静态缓冲区占位即可。
+static char s_ctx_placeholder[64];
+
 extern "C" CustomCtx* initLib(CustomInitParams initParams) {
-    // This implementation is stateless for now.
     (void)initParams;
-    return nullptr;
+    return reinterpret_cast<CustomCtx*>(s_ctx_placeholder);
 }
 
 extern "C" void deInitLib(CustomCtx* ctx) { (void)ctx; }
