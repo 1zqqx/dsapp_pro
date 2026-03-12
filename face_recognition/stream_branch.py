@@ -1,4 +1,4 @@
-"""Per-stream branch: demux src_N → queue → nvvidconv → nvosd → valve → rtsp_client_bin."""
+"""Per-stream branch: demux src_N → valve → queue → nvvidconv → nvosd → rtsp_client_bin."""
 
 from __future__ import annotations
 
@@ -59,34 +59,35 @@ class StreamBranch:
             raise RuntimeError(f"Unable to create valve-{idx:03d}")
 
         rtsp_enabled = self._rtsp_cfg.get("enabled", False)
+        # valve: drop=False, the data flow is passing normally; drop=True, the data flow is blocked.
         self._valve.set_property("drop", not rtsp_enabled)
 
         self._rtsp_bin = get_rtsp_client_bin(args=self._rtsp_cfg)
         self._rtsp_bin.set_property("name", f"rtsp-client-bin-{idx:03d}")
 
         self._elements = [
+            self._valve,
             self._queue,
             self._nvvidconv,
             self._nvosd,
-            self._valve,
             self._rtsp_bin,
         ]
         for el in self._elements:
             p.add(el)
 
+        self._valve.link(self._queue)
         self._queue.link(self._nvvidconv)
         self._nvvidconv.link(self._nvosd)
-        self._nvosd.link(self._valve)
-        self._valve.link(self._rtsp_bin)
+        self._nvosd.link(self._rtsp_bin)
 
         pad_name = f"src_{idx}"
         self._demux_src_pad = self._demux.request_pad_simple(pad_name)
         if not self._demux_src_pad:
             raise RuntimeError(f"Unable to get demux pad {pad_name}")
-        queue_sink = self._queue.get_static_pad("sink")
-        ret = self._demux_src_pad.link(queue_sink)
+        valve_sink = self._valve.get_static_pad("sink")
+        ret = self._demux_src_pad.link(valve_sink)
         if ret != Gst.PadLinkReturn.OK:
-            raise RuntimeError(f"Failed to link demux {pad_name} → queue sink: {ret}")
+            raise RuntimeError(f"Failed to link demux {pad_name} → valve sink: {ret}")
 
         logger.info(f"StreamBranch {idx} built (rtsp_enabled={rtsp_enabled})")
 
