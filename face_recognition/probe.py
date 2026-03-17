@@ -157,13 +157,15 @@ def _batch_buffer_probe(pad, info, u_data):
 
                 if async_matcher is not None:
                     cached = async_matcher.get_result(source_id, object_id)
+                    txt = obj_meta.text_params
                     if cached is not None:
-                        txt = obj_meta.text_params
                         txt.display_text = f"{cached.name}-{cached.score:.2f}"
-                        txt.font_params.font_name = "Serif"
-                        txt.font_params.font_size = 14
-                        txt.font_params.font_color.set(0.0, 1.0, 0.0, 1.0)
-                        txt.set_bg_clr = 0
+                    else:
+                        txt.display_text = "Unknown"
+                    txt.font_params.font_name = "Serif"
+                    txt.font_params.font_size = 14
+                    txt.font_params.font_color.set(0.0, 1.0, 0.0, 1.0)
+                    txt.set_bg_clr = 0
 
                     if async_matcher.needs_submit(source_id, object_id, frame_number):
                         emb = get_arcface_embedding_from_obj(
@@ -220,6 +222,51 @@ def _batch_buffer_probe(pad, info, u_data):
             except StopIteration:
                 break
             # end of l_frame
+
+        l_user_meta = batch_meta.batch_user_meta_list
+        while l_user_meta is not None:
+            try:
+                user_meta = pyds.NvDsUserMeta.cast(l_user_meta.data)
+            except StopIteration:
+                break
+            if user_meta.base_meta.meta_type == pyds.NVDS_PREPROCESS_BATCH_META:
+                # preprocess 的元数据
+                try:
+                    preprocess_batchmeta = pyds.GstNvDsPreProcessBatchMeta.cast(
+                        user_meta.user_meta_data
+                    )
+                except StopIteration:
+                    break
+                roi_cnt = 0
+
+                for roi_meta in preprocess_batchmeta.roi_vector:
+                    # Label ROI in display
+                    display_meta = pyds.nvds_acquire_display_meta_from_pool(batch_meta)
+                    display_meta.num_labels = 1
+
+                    txt_params = display_meta.text_params[0]
+                    txt_params.display_text = f"Roi:{roi_cnt}"
+
+                    txt_params.x_offset = int(roi_meta.roi.left)
+                    txt_params.y_offset = int(roi_meta.roi.top)
+
+                    txt_params.font_params.font_name = "Serif"
+                    txt_params.font_params.font_size = 14
+                    txt_params.font_params.font_color.set(0, 1.0, 0, 1.0)  # RGBA
+                    txt_params.set_bg_clr = 0
+                    # txt_params.text_bg_clr.set(0.0, 0.0, 0.0, 0.5)
+                    pyds.nvds_add_display_meta_to_frame(
+                        roi_meta.frame_meta, display_meta
+                    )
+                    # logger.debug(
+                    #     f"frame {roi_meta.frame_meta.frame_num} src {roi_meta.frame_meta.source_id} roi {roi_cnt}"
+                    # )
+                    roi_cnt += 1
+            try:
+                l_user_meta = l_user_meta.next
+            except StopIteration:
+                break
+            # end of batch_user_meta_list
     finally:
         pyds.nvds_release_meta_lock(batch_meta)
 
