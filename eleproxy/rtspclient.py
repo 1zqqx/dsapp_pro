@@ -200,16 +200,17 @@ def get_rtsp_client_bin(
     """
     创建通过 rtspclientsink 推流到 mediaMTX 的 Gst.Bin.
 
-    管道逻辑: sink(ghost) -> nvvideoconvert -> capsfilter(I420) -> nvv4l2h265enc
-              -> h265parse -> rtspclientsink
+    管道逻辑: sink(ghost) -> nvvideoconvert -> capsfilter(I420) -> nvv4l2h26xenc
+              -> h26xparse -> rtspclientsink
 
     args :
+    + codec: str, "H264" | "H265", 默认 "H264" (WebRTC/浏览器兼容优先)
     + insert-sps-pps: int, default -1
     + bitrate: int, 编码码率, 默认 4000000
     + iframeinterval: int, I 帧间隔, 默认 15
     + idrinterval: int, IDR 帧间隔, 默认 15
-    + num_B_frames: int, B 帧数量, 默认 0
-    + profile: int, H265 编码 profile, 默认 0
+    + num_B_frames / num-B-Frames: int, B 帧数量, 默认 0(WebRTC 必须为 0)
+    + profile: int, 编码 profile, 默认 0
     + mediamtx_url: str, 推流目标地址, 默认 "rtsp://127.0.0.1:8554/stream/10086"
     + rtsp_protocols: int | None, rtspclientsink 使用的传输协议, 默认 None (不设置) 4=TCP(可靠易卡顿) 1=UDP(实时易花屏)
     + caps: str, default: `video/x-raw(memory:NVMM), format=I420`
@@ -219,6 +220,9 @@ def get_rtsp_client_bin(
       Gst.Bin, 带有一个 ghost sink pad, 用于连接上游输出.
     """
     args = args or {}
+    codec = str(args.get("codec", "H264")).upper()
+    if codec not in ("H264", "H265"):
+        raise ValueError("codec must be H264 or H265")
 
     # 1. nvvideoconvert
     nvvidconv = Gst.ElementFactory.make("nvvideoconvert", "rtsp-client-convert")
@@ -232,12 +236,13 @@ def get_rtsp_client_bin(
     _caps = args.get("caps", "video/x-raw(memory:NVMM), format=I420")
     capsfilter.set_property("caps", Gst.Caps.from_string(_caps))
 
-    # 3. H265 encoder
-    encoder = Gst.ElementFactory.make("nvv4l2h265enc", "rtsp-client-encoder")
+    # 3. H26x encoder
+    encoder_name = "nvv4l2h264enc" if codec == "H264" else "nvv4l2h265enc"
+    encoder = Gst.ElementFactory.make(encoder_name, "rtsp-client-encoder")
     if not encoder:
-        raise RuntimeError("Unable to create nvv4l2h265enc")
+        raise RuntimeError(f"Unable to create {encoder_name}")
 
-    _a = args.get("insert-sps-pps", -1)
+    _a = args.get("insert-sps-pps", 1)
     if _a is not None:
         encoder.set_property("insert-sps-pps", _a)
     _a = args.get("profile", 0)
@@ -252,17 +257,22 @@ def get_rtsp_client_bin(
     _a = args.get("idrinterval", 15)
     if _a is not None:
         encoder.set_property("idrinterval", _a)
-    _a = args.get("num-B-Frames", 0)
+    # 兼容两种命名,且默认强制 0,避免 WebRTC 因 B-frames 拒流
+    _a = args.get("num-B-Frames", args.get("num_B_frames", 0))
     if _a is not None:
         encoder.set_property("num-B-Frames", _a)
 
-    # 4. h265parse
-    h265parse = Gst.ElementFactory.make("h265parse", "rtsp-client-h265parse")
-    if not h265parse:
-        raise RuntimeError("Unable to create h265parse")
+    # 4. parser
+    parse_name = "h264parse" if codec == "H264" else "h265parse"
+    parse_ele_name = (
+        "rtsp-client-h264parse" if codec == "H264" else "rtsp-client-h265parse"
+    )
+    h26xparse = Gst.ElementFactory.make(parse_name, parse_ele_name)
+    if not h26xparse:
+        raise RuntimeError(f"Unable to create {parse_name}")
     _a = args.get("config-interval", -1)
     if _a is not None:
-        h265parse.set_property("config-interval", _a)
+        h26xparse.set_property("config-interval", _a)
 
     # 5. rtspclientsink
     clientsink = Gst.ElementFactory.make("rtspclientsink", "rtsp-client-sink")
@@ -278,12 +288,12 @@ def get_rtsp_client_bin(
 
     # 6. bin 组装与链接
     bin_ = Gst.Bin.new("rtsp-client-bin")
-    for ele in (nvvidconv, capsfilter, encoder, h265parse, clientsink):
+    for ele in (nvvidconv, capsfilter, encoder, h26xparse, clientsink):
         bin_.add(ele)
     nvvidconv.link(capsfilter)
     capsfilter.link(encoder)
-    encoder.link(h265parse)
-    h265parse.link(clientsink)
+    encoder.link(h26xparse)
+    h26xparse.link(clientsink)
 
     # ghost pad: 将 nvvideoconvert 的 sink 暴露为 bin 的 sink
     sink_pad = nvvidconv.get_static_pad("sink")
