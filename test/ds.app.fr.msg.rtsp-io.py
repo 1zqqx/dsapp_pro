@@ -31,8 +31,30 @@ setup_logging(level="DEBUG", log_file=None)
 logger = get_logger(__name__)
 
 
-def get_example_config():
+def get_example_config(pgie_roi_batch: int = 4):
     """返回符合 FaceRecognitionPipeline 的配置结构."""
+    if pgie_roi_batch not in (1, 2, 4):
+        raise ValueError(f"pgie_roi_batch must be 2 or 4, got {pgie_roi_batch}")
+
+    # 当前示例固定两路源:
+    # - b4: 每路 2 个 ROI => 总 ROI=4 => pgie batch-size=4
+    # - b2: 每路 1 个 ROI => 总 ROI=2 => pgie batch-size=2
+    preprocess_cfg = (
+        "/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/nvconfigs/"
+        f"dsapp_preprocess_pgie_config_b{pgie_roi_batch}.txt"
+    )
+    engine_path = (
+        f"/home/good/wkspace/pubdata/models/scrfd/scrfd_2.5g_bnkps_640x640."
+        f"onnx_b{pgie_roi_batch}_gpu0_fp16.engine"
+    )
+    # 若对应 batch 的 engine 不存在，让 nvinfer 使用 onnx-file 构建（更慢但能避免直接失败）
+    if not os.path.exists(engine_path):
+        logger.warning(
+            "Engine not found for b=%s: %s (will build from onnx)",
+            pgie_roi_batch,
+            engine_path,
+        )
+        engine_path = None
 
     return {
         "debug_batch_meta_trace": True,
@@ -72,14 +94,14 @@ def get_example_config():
                 "height": 1440,
             },
             "nvdspreprocess": {
-                "config_file": "/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/nvconfigs/dsapp_preprocess_pgie_config.txt",
+                "config_file": preprocess_cfg,
             },
             "pgie": {
                 "gpu_id": 0,
-                "batch_size": 1,  # FIXME modify, 2;4 & [model_engine_file] -> bug
+                "batch_size": pgie_roi_batch,
                 "input_tensor_meta": True,
                 "config_file_path": "/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/nvconfigs/dsapp_pgie_scrfd_config.txt",
-                # "model_engine_file": "/home/good/wkspace/pubdata/models/scrfd/scrfd_2.5g_bnkps_640x640.onnx_b4_gpu0_fp16.engine",
+                "model_engine_file": engine_path,
             },
             # "nvdspreprocess_sgie": {
             #     "config_file": "/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/nvconfigs/dsapp_preprocess_sgie_1_config.txt",
@@ -88,7 +110,7 @@ def get_example_config():
                 "gpu_id": 0,
                 "batch_size": 8,
                 "config_file_path": "/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/nvconfigs/dsapp_sgie_arcface_config.txt",
-                # "model_engine_file": "/home/good/wkspace/pubdata/models/arcface/arcface_r50_webface.onnx_b8_gpu0_fp16.engine",
+                "model_engine_file": "/home/good/wkspace/pubdata/models/arcface/arcface_r50_webface.onnx_b8_gpu0_fp16.engine",
             },
             "nvtracker": {
                 "config_file": "/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/nvconfigs/dsapp_tracker_config.txt",
@@ -97,32 +119,14 @@ def get_example_config():
         "faiss": {
             "face_db_dir": "/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/scripts/face_db.temp.txt",
         },
-        "message": {
-            # 可选：启用消息分支(Redis 等)
-            "nvmsgconv": {
-                "config": "/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/nvconfigs/dstest4_msgconv_config.txt",
-                "payload_type": 1,
-                "msg2p_newapi": True,
-                "dummy_payload": True,
-                "frame_interval": 25,
-            },
-            "nvmsgbroker": {
-                "proto_lib": "/opt/nvidia/deepstream/deepstream/lib/libnvds_redis_proto.so",
-                "conn_str": "127.0.0.1;6399",
-                "config": "/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/nvconfigs/dsapp_msgbroker_cfg_redis.txt",
-                "streamsize": 1000,
-                "topic": "FR-topic-batchsize-fixed",
-                "sync": False,
-            },
-        },
     }
 
 
-def run_basic():
+def run_basic(pgie_roi_batch: int = 4):
     """仅构建并启动管道, Ctrl+C 退出."""
     from face_recognition import FaceRecognitionPipeline
 
-    config = get_example_config()
+    config = get_example_config(pgie_roi_batch=pgie_roi_batch)
 
     pipeline = FaceRecognitionPipeline(config)
     pipeline.build()
@@ -150,17 +154,17 @@ def run_basic():
     logger.info("Done.")
 
 
-def run_with_dynamic_api():
+def run_with_dynamic_api(pgie_roi_batch: int = 4):
     """构建并启动后,在另一线程中演示动态 add_source / remove_source / enable_rtsp / disable_rtsp."""
     import threading
 
     from face_recognition import FaceRecognitionPipeline
 
-    config = get_example_config()
+    config = get_example_config(pgie_roi_batch=pgie_roi_batch)
     # 先只用一个源启动
     config["sources"] = config["sources"][:1]
-    for k in ("nvstreammux", "pgie", "sgie"):
-        config["inference"][k]["batch_size"] = 1
+    # for k in ("nvstreammux", "pgie", "sgie"):
+    #     config["inference"][k]["batch_size"] = 1
 
     pipeline = FaceRecognitionPipeline(config)
     pipeline.build()
@@ -196,6 +200,8 @@ def run_with_dynamic_api():
         pipeline.remove_source(pad)
         logger.info(f"remove_source({pad})")
 
+        time.sleep(60)
+
     t = threading.Thread(target=demo_api, daemon=True)
     logger.info(" Start Change ")
     t.start()
@@ -224,10 +230,19 @@ if __name__ == "__main__":
         action="store_true",
         help="演示动态 add/remove source 与 enable/disable RTSP",
     )
+    parser.add_argument(
+        "--pgie-batch",
+        type=int,
+        default=4,
+        choices=[1, 2, 4],
+        help="SCRFD 的 preprocess tensor batch + pgie batch-size(2 或 4)",
+    )
     args = parser.parse_args()
     logger.info(f"args: {args}")
 
     if args.dynamic:
-        run_with_dynamic_api()
+        # dynamic 模式当前未完整实现 batch/engine 的运行时切换.
+        # 为了降低变量，固定使用 batch=4.
+        run_with_dynamic_api(pgie_roi_batch=4)
     else:
-        run_basic()
+        run_basic(pgie_roi_batch=args.pgie_batch)

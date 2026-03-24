@@ -11,8 +11,12 @@
 
 #include <cstring>
 #include <string>
+#include <iostream>
 #include <unordered_map>
 #include <vector>
+
+#include <cuda_runtime.h>
+
 // gstnvdsmeta 头文件 中使用了 string/vector 在此之前引入
 #include <gstnvdsmeta.h>
 #include <nvbufsurface.h>
@@ -132,6 +136,44 @@ extern "C" NvDsPreProcessStatus CustomTensorPreparation(CustomCtx* ctx, NvDsPreP
 
     const int max_units = std::min<int>(static_cast<int>(batch->units.size()), n_in);
 
+    static bool debug_units_once = true;
+    if (debug_units_once) {
+        std::cerr << "[=] preprocess tensor slots debug: n_in=" << n_in
+                  << ", units.size=" << batch->units.size()
+                  << ", max_units=" << max_units
+                  << ", network_input_order=" << (int)tp.network_input_order
+                  << std::endl;
+        std::cerr << "[=] tensor shape NCHW-like: n=" << n_in
+                  << " c=" << c_in << " h=" << h_in << " w=" << w_in
+                  << ", tensor_data_type=" << (int)tp.data_type
+                  << ", network_color_format=" << (int)tp.network_color_format
+                  << std::endl;
+        for (int unit_idx = 0; unit_idx < max_units; ++unit_idx) {
+            const NvDsPreProcessUnit& unit = batch->units[unit_idx];
+            const auto& roi = unit.roi_meta.roi;
+            unsigned int src_id = 0;
+            if (unit.frame_meta) {
+                src_id = (unsigned int)unit.frame_meta->source_id;
+            }
+            const NvBufSurfaceParams* conv = unit.roi_meta.converted_buffer;
+            uint32_t pitch_dbg = conv ? conv->pitch : 0;
+            NvBufSurfaceColorFormat fmt_dbg = conv ? conv->colorFormat : NVBUF_COLOR_FORMAT_INVALID;
+            uint32_t height_dbg = conv ? conv->height : 0;
+            uint32_t dataSize_dbg = conv ? conv->dataSize : 0;
+            std::cerr << "  unit[" << unit_idx << "]: src_id=" << src_id
+                      << " frame_num=" << (unit.frame_meta ? (unsigned long)unit.frame_meta->frame_num : 0ul)
+                      << " converted=" << (unit.converted_frame_ptr ? 1 : 0)
+                      << " roi=(" << (int)roi.left << "," << (int)roi.top << ","
+                      << (int)roi.width << "x" << (int)roi.height << ")"
+                      << " conv.pitch=" << pitch_dbg
+                      << " conv.h=" << height_dbg
+                      << " conv.fmt=" << (int)fmt_dbg
+                      << " conv.dataSize=" << dataSize_dbg
+                      << std::endl;
+        }
+        debug_units_once = false;
+    }
+
     for (int unit_idx = 0; unit_idx < max_units; ++unit_idx) {
         const NvDsPreProcessUnit& unit = batch->units[unit_idx];
 
@@ -139,33 +181,128 @@ extern "C" NvDsPreProcessStatus CustomTensorPreparation(CustomCtx* ctx, NvDsPreP
             continue;
         }
 
-        const uint8_t* src = static_cast<const uint8_t*>(unit.converted_frame_ptr);
+        const void* src_ptr = unit.converted_frame_ptr;
+        const uint8_t* src_cpu = nullptr;
+        std::vector<uint8_t> host_copy;
 
         const size_t base = static_cast<size_t>(unit_idx) * nchw;
 
+        // nvdspreprocess 内部对 RGB/BGR 会把 scaling pool 的输出格式统一成 RGBA
+        // 因此这里必须使用 pitch + bpp 来正确索引，而不能假设紧密 packed RGB=3bytes/px。
+        const NvBufSurfaceParams* conv = unit.roi_meta.converted_buffer;
+        uint32_t pitch = conv ? conv->pitch : 0;
+        NvBufSurfaceColorFormat fmt = conv ? conv->colorFormat : NVBUF_COLOR_FORMAT_INVALID;
+        uint32_t conv_h = conv ? conv->height : 0;
+        uint32_t conv_data_size = conv ? conv->dataSize : 0;
+
+        // bytes per pixel for single-plane formats used by nvdspreprocess scaling pool
+        int bpp = 0;
+        switch (fmt) {
+            case NVBUF_COLOR_FORMAT_RGBA:
+            case NVBUF_COLOR_FORMAT_BGRA:
+            case NVBUF_COLOR_FORMAT_ARGB:
+            case NVBUF_COLOR_FORMAT_ABGR:
+            case NVBUF_COLOR_FORMAT_RGBx:
+            case NVBUF_COLOR_FORMAT_BGRx:
+            case NVBUF_COLOR_FORMAT_xRGB:
+            case NVBUF_COLOR_FORMAT_xBGR:
+                bpp = 4;
+                break;
+            case NVBUF_COLOR_FORMAT_RGB:
+            case NVBUF_COLOR_FORMAT_BGR:
+                bpp = 3;
+                break;
+            case NVBUF_COLOR_FORMAT_GRAY8:
+                bpp = 1;
+                break;
+            default:
+                // 兜底：保守按 4 处理，避免 bpp 太小导致越界读。
+                bpp = 4;
+                break;
+        }
+
+        if (pitch == 0) {
+            pitch = static_cast<uint32_t>(w_in) * static_cast<uint32_t>(bpp);
+        }
+
+        // 防止 pitch/bpp 推断错误导致越界。
+        const int max_y = (conv_h > 0) ? std::min(h_in, (int)conv_h) : h_in;
+        const int max_x_by_pitch = (bpp > 0) ? std::min(w_in, (int)(pitch / (uint32_t)bpp)) : w_in;
+
+        // unit.converted_frame_ptr 可能指向 device memory，直接 src[src_idx] 解引用会 core dump。
+        // 这里先拷贝到 CPU 可读的临时 buffer，再从 buffer 填充 tensor。
+        size_t copy_bytes = static_cast<size_t>(pitch) * static_cast<size_t>(max_y);
+        if (conv_data_size > 0) {
+            copy_bytes = std::min(copy_bytes, static_cast<size_t>(conv_data_size));
+        }
+        if (copy_bytes > 0 && src_ptr != nullptr) {
+            host_copy.resize(copy_bytes);
+            cudaError_t cerr = cudaMemcpy(host_copy.data(), src_ptr, copy_bytes, cudaMemcpyDefault);
+            if (cerr == cudaSuccess) {
+                src_cpu = host_copy.data();
+            } else {
+                std::cerr << "[!] preprocess tensor: cudaMemcpy failed: " << cudaGetErrorString(cerr)
+                          << " copy_bytes=" << copy_bytes << std::endl;
+                src_cpu = nullptr;
+            }
+        } else {
+            src_cpu = nullptr;
+        }
+
         // Assume RGB packed input (3 channels) from scaling pool.
+        // tensor 要输出 c_in 个通道，但源像素布局可能只有 1/3/4。
+        // 当源为灰度(bpp=1)时，后续复制时需要避免 src[src_idx + c] 越界。
         const int channels = std::min(c_in, 3);
 
         if (is_nchw) {
             for (int c = 0; c < channels; ++c) {
                 const size_t c_off = base + static_cast<size_t>(c) * h_in * w_in;
-                for (int y = 0; y < h_in; ++y) {
-                    for (int x = 0; x < w_in; ++x) {
-                        const size_t src_idx = (static_cast<size_t>(y) * w_in + x) * 3 + c;
+                for (int y = 0; y < max_y; ++y) {
+                    for (int x = 0; x < max_x_by_pitch; ++x) {
+                        const size_t src_row_off = static_cast<size_t>(y) * pitch;
+                        const size_t src_px_off = static_cast<size_t>(x) * (size_t)bpp;
+                        size_t src_idx = src_row_off + src_px_off;
+                        // 如果源为灰度/单通道(bpp==1)，所有 c 都读同一个字节。
+                        if (bpp > 1) {
+                            src_idx += (size_t)c;
+                        }
                         const size_t dst_idx = c_off + static_cast<size_t>(y) * w_in + x;
-                        dst[dst_idx] = static_cast<float>(src[src_idx]) * norm;
+                        // src 指针假设可访问；另外用 conv_data_size 做保守边界。
+                        if (conv_data_size > 0 && src_idx >= conv_data_size) {
+                            dst[dst_idx] = 0.f;
+                        } else {
+                            if (src_cpu) {
+                                dst[dst_idx] = static_cast<float>(src_cpu[src_idx]) * norm;
+                            } else {
+                                dst[dst_idx] = 0.f;
+                            }
+                        }
                     }
                 }
             }
         } else {
             // NHWC layout.
             const size_t n_off = static_cast<size_t>(unit_idx) * h_in * w_in * channels;
-            for (int y = 0; y < h_in; ++y) {
-                for (int x = 0; x < w_in; ++x) {
-                    const size_t src_idx = (static_cast<size_t>(y) * w_in + x) * 3;
+            for (int y = 0; y < max_y; ++y) {
+                for (int x = 0; x < max_x_by_pitch; ++x) {
+                    const size_t src_row_off = static_cast<size_t>(y) * pitch;
+                    const size_t src_px_off = static_cast<size_t>(x) * (size_t)bpp;
+                    size_t src_idx = src_row_off + src_px_off;
                     const size_t dst_idx = n_off + (static_cast<size_t>(y) * w_in + x) * channels;
                     for (int c = 0; c < channels; ++c) {
-                        dst[dst_idx + c] = static_cast<float>(src[src_idx + c]) * norm;
+                        size_t idx = src_idx;
+                        if (bpp > 1) {
+                            idx += (size_t)c;
+                        }
+                        if (conv_data_size > 0 && idx >= conv_data_size) {
+                            dst[dst_idx + c] = 0.f;
+                        } else {
+                            if (src_cpu) {
+                                dst[dst_idx + c] = static_cast<float>(src_cpu[idx]) * norm;
+                            } else {
+                                dst[dst_idx + c] = 0.f;
+                            }
+                        }
                     }
                 }
             }

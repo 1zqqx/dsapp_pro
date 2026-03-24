@@ -7,13 +7,15 @@
  * Strides: 8, 16, 32. Bbox format: (l,t,r,b) from center, multiply by stride.
  */
 
-#include "nvdsinfer_custom_impl.h"
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
-#include <algorithm>
-#include <cmath>
+#include <limits>
 #include <vector>
+
+#include "nvdsinfer_custom_impl.h"
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -27,24 +29,21 @@
  * @param dtype FLOAT 或 HALF
  * @return 对应的 float 值
  */
-static float getFloat(const void *buf, int idx, NvDsInferDataType dtype)
-{
-    if (dtype == FLOAT)
-    {
-        return ((const float *)buf)[idx];
+static float getFloat(const void* buf, int idx, NvDsInferDataType dtype) {
+    if (dtype == FLOAT) {
+        return ((const float*)buf)[idx];
     }
-    if (dtype == HALF)
-    {
+    if (dtype == HALF) {
         /* FP16: 按 IEEE 754 half 格式解析 */
-        const uint16_t *h = (const uint16_t *)buf;
+        const uint16_t* h = (const uint16_t*)buf;
         uint16_t v = h[idx];
         int sign = (v >> 15) & 1;
         int expo = (v >> 10) & 0x1f;
         int mant = v & 0x3ff;
         if (expo == 0)
-            return mant ? (sign ? -1.f : 1.f) * (mant / 1024.f) * (1.f / 16384.f) : (sign ? -0.f : 0.f);
-        if (expo == 31)
-            return mant ? 0.f : (sign ? -INFINITY : INFINITY);
+            return mant ? (sign ? -1.f : 1.f) * (mant / 1024.f) * (1.f / 16384.f)
+                        : (sign ? -0.f : 0.f);
+        if (expo == 31) return mant ? 0.f : (sign ? -INFINITY : INFINITY);
         return (sign ? -1.f : 1.f) * (1.f + mant / 1024.f) * std::ldexp(1.f, expo - 15);
     }
     return 0.f;
@@ -61,25 +60,16 @@ static float getFloat(const void *buf, int idx, NvDsInferDataType dtype)
  * @param out_idx      输出: 匹配到的层在 layers 中的下标
  * @return 是否找到
  */
-static bool findLayerByShape(
-    const std::vector<NvDsInferLayerInfo> &layers,
-    int want_anchors,
-    int want_c,
-    int &out_idx)
-{
-    for (size_t i = 0; i < layers.size(); i++)
-    {
-        const NvDsInferDims &d = layers[i].inferDims;
+static bool findLayerByShape(const std::vector<NvDsInferLayerInfo>& layers, int want_anchors,
+                             int want_c, int& out_idx) {
+    for (size_t i = 0; i < layers.size(); i++) {
+        const NvDsInferDims& d = layers[i].inferDims;
         bool has_na = false, has_c = false;
-        for (unsigned int k = 0; k < d.numDims; k++)
-        {
-            if ((int)d.d[k] == want_anchors)
-                has_na = true;
-            if ((int)d.d[k] == want_c)
-                has_c = true;
+        for (unsigned int k = 0; k < d.numDims; k++) {
+            if ((int)d.d[k] == want_anchors) has_na = true;
+            if ((int)d.d[k] == want_c) has_c = true;
         }
-        if (has_na && has_c)
-        {
+        if (has_na && has_c) {
             out_idx = (int)i;
             return true;
         }
@@ -97,11 +87,59 @@ static bool findLayerByShape(
  * @param anchor_dim   inferDims 中大小为 na 的维度下标
  * @param channel_dim  inferDims 中大小为 4 的维度下标
  */
-static inline __attribute__((always_inline)) int bboxLinearIndex(int anchor_idx, int k, int na, int anchor_dim, int channel_dim)
-{
-    if (channel_dim > anchor_dim)
-        return anchor_idx * 4 + k;
+static inline __attribute__((always_inline)) int bboxLinearIndex(int anchor_idx, int k, int na,
+                                                                 int anchor_dim, int channel_dim) {
+    if (channel_dim > anchor_dim) return anchor_idx * 4 + k;
     return k * na + anchor_idx;
+}
+
+static inline int scoreLinearIndex(int anchor_idx) { return anchor_idx; }
+
+struct LayerBatchLayout {
+    int anchors = 0;
+    int channels = 0;
+    int anchor_dim = -1;
+    int channel_dim = -1;
+    int batch = 1;
+    int sample_stride = 0;
+};
+
+static int safeDim(const NvDsInferDims& d, unsigned int i) {
+    if (i >= d.numDims) return 0;
+    return d.d[i];
+}
+
+static int inferLayerBatch(const NvDsInferLayerInfo& layer, int anchors, int channels,
+                           int& anchor_dim, int& channel_dim) {
+    anchor_dim = -1;
+    channel_dim = -1;
+    int64_t total = 1;
+    for (unsigned int i = 0; i < layer.inferDims.numDims; i++) {
+        int dim = safeDim(layer.inferDims, i);
+        if (dim <= 0) return 1;
+        total *= dim;
+        if (dim == anchors && anchor_dim < 0) anchor_dim = (int)i;
+        if (dim == channels && channel_dim < 0) channel_dim = (int)i;
+    }
+    if (anchor_dim < 0 || channel_dim < 0) return 1;
+
+    const int64_t per_sample = (int64_t)anchors * (int64_t)channels;
+    if (per_sample <= 0) return 1;
+    if (total < per_sample || (total % per_sample) != 0) return 1;
+
+    int64_t b = total / per_sample;
+    if (b < 1) b = 1;
+    if (b > std::numeric_limits<int>::max()) b = std::numeric_limits<int>::max();
+    return (int)b;
+}
+
+static void printLayerDimsOnce(const NvDsInferLayerInfo& layer) {
+    std::cerr << layer.layerName << " dims=[";
+    for (unsigned int i = 0; i < layer.inferDims.numDims; i++) {
+        if (i > 0) std::cerr << ",";
+        std::cerr << safeDim(layer.inferDims, i);
+    }
+    std::cerr << "] dtype=" << layer.dataType;
 }
 
 /**
@@ -115,15 +153,12 @@ static inline __attribute__((always_inline)) int bboxLinearIndex(int anchor_idx,
  * @param objectList        输出: 解析得到的目标框列表，push_back 填入
  * @return true 表示解析成功; false 会导致 nvinfer 报错
  */
-extern "C" bool NvDsInferParseCustomSCRFD(
-    std::vector<NvDsInferLayerInfo> const &outputLayersInfo,
-    NvDsInferNetworkInfo const &networkInfo,
-    NvDsInferParseDetectionParams const &detectionParams,
-    std::vector<NvDsInferObjectDetectionInfo> &objectList)
-{
+extern "C" bool NvDsInferParseCustomSCRFD(std::vector<NvDsInferLayerInfo> const& outputLayersInfo,
+                                          NvDsInferNetworkInfo const& networkInfo,
+                                          NvDsInferParseDetectionParams const& detectionParams,
+                                          std::vector<NvDsInferObjectDetectionInfo>& objectList) {
     /* 至少需要 6 层: 3 个 stride 的 score + bbox */
-    if (outputLayersInfo.size() < 6u)
-    {
+    if (outputLayersInfo.size() < 6u) {
         std::cerr << "SCRFD parser: expected at least 6 output layers (score+bbox x3), got "
                   << outputLayersInfo.size() << std::endl;
         return false;
@@ -138,16 +173,15 @@ extern "C" bool NvDsInferParseCustomSCRFD(
     /* 置信度阈值: 优先使用配置文件 [class-attrs-all] 的 pre-cluster-threshold */
     float threshold = 0.5f;
     if (detectionParams.numClassesConfigured > 0 &&
-        !detectionParams.perClassPreclusterThreshold.empty())
-    {
+        !detectionParams.perClassPreclusterThreshold.empty()) {
         threshold = detectionParams.perClassPreclusterThreshold[0];
     }
 
     const int net_w = (int)networkInfo.width;
     const int net_h = (int)networkInfo.height;
 
-    for (int s = 0; s < 3; s++)
-    {
+    static bool debug_layout_once = true;
+    for (int s = 0; s < 3; s++) {
         int stride = strides[s];
         int na = anchors[s];
         int grid_h = heights[s];
@@ -157,84 +191,110 @@ extern "C" bool NvDsInferParseCustomSCRFD(
 
         int score_idx = -1, bbox_idx = -1;
         if (!findLayerByShape(outputLayersInfo, na, 1, score_idx) ||
-            !findLayerByShape(outputLayersInfo, na, 4, bbox_idx))
-        {
+            !findLayerByShape(outputLayersInfo, na, 4, bbox_idx)) {
             continue; /* skip this stride if layers not found */
         }
 
-        const NvDsInferLayerInfo &score_layer = outputLayersInfo[score_idx];
-        const NvDsInferLayerInfo &bbox_layer = outputLayersInfo[bbox_idx];
+        const NvDsInferLayerInfo& score_layer = outputLayersInfo[score_idx];
+        const NvDsInferLayerInfo& bbox_layer = outputLayersInfo[bbox_idx];
 
-        if (!score_layer.buffer || !bbox_layer.buffer)
-            continue;
+        if (!score_layer.buffer || !bbox_layer.buffer) continue;
 
-        /* 确定 bbox 层维度顺序，以便 bboxLinearIndex 正确计算线性下标 */
-        int bbox_anchor_dim = -1, bbox_channel_dim = -1;
-        for (unsigned int k = 0; k < bbox_layer.inferDims.numDims; k++)
-        {
-            if ((int)bbox_layer.inferDims.d[k] == na)
-                bbox_anchor_dim = (int)k;
-            if ((int)bbox_layer.inferDims.d[k] == 4)
-                bbox_channel_dim = (int)k;
+        int score_anchor_dim = -1;
+        int score_channel_dim = -1;
+        int bbox_anchor_dim = -1;
+        int bbox_channel_dim = -1;
+        int score_batch = inferLayerBatch(score_layer, na, 1, score_anchor_dim, score_channel_dim);
+        int bbox_batch = inferLayerBatch(bbox_layer, na, 4, bbox_anchor_dim, bbox_channel_dim);
+        const int effective_batch = std::min(score_batch, bbox_batch);
+        if (bbox_anchor_dim < 0 || bbox_channel_dim < 0 || effective_batch < 1) continue;
+
+        if (debug_layout_once) {
+            std::cerr << "[=] SCRFD parser layer layout stride=" << stride << " ";
+            printLayerDimsOnce(score_layer);
+            std::cerr << " | ";
+            printLayerDimsOnce(bbox_layer);
+            std::cerr << " inferred_batch(score=" << score_batch << ", bbox=" << bbox_batch
+                      << ", use=" << effective_batch << ")" << std::endl;
         }
-        if (bbox_anchor_dim < 0 || bbox_channel_dim < 0)
-            continue;
 
         NvDsInferDataType score_dtype = score_layer.dataType;
         NvDsInferDataType bbox_dtype = bbox_layer.dataType;
+        const int score_sample_stride = na;
+        const int bbox_sample_stride = na * 4;
+        for (int b = 0; b < effective_batch; b++) {
+            const int score_batch_offset = b * score_sample_stride;
+            const int bbox_batch_offset = b * bbox_sample_stride;
+            for (int idx = 0; idx < na; idx++) {
+                float conf = getFloat(score_layer.buffer,
+                                      score_batch_offset + scoreLinearIndex(idx), score_dtype);
+                if (conf < threshold) continue;
 
-        for (int idx = 0; idx < na; idx++)
-        {
-            float conf = getFloat(score_layer.buffer, idx, score_dtype);
-            if (conf < threshold)
-                continue;
+                /* 锚点对应特征图上的 cell，中心在图像坐标 (cx, cy) */
+                int cell_idx = idx / num_anchors_per_cell;
+                int cy_grid = cell_idx / grid_w;
+                int cx_grid = cell_idx % grid_w;
+                float cx = (cx_grid + 0.5f) * stride;
+                float cy = (cy_grid + 0.5f) * stride;
 
-            /* 锚点对应特征图上的 cell，中心在图像坐标 (cx, cy) */
-            int cell_idx = idx / num_anchors_per_cell;
-            int cy_grid = cell_idx / grid_w;
-            int cx_grid = cell_idx % grid_w;
-            float cx = (cx_grid + 0.5f) * stride;
-            float cy = (cy_grid + 0.5f) * stride;
+                /* SCRFD bbox 格式: 中心到四边的距离 (l,t,r,b)，网络输出需乘 stride 得像素距离 */
+                float l = getFloat(bbox_layer.buffer,
+                                   bbox_batch_offset + bboxLinearIndex(idx, 0, na, bbox_anchor_dim,
+                                                                       bbox_channel_dim),
+                                   bbox_dtype) *
+                          stride;
+                float t = getFloat(bbox_layer.buffer,
+                                   bbox_batch_offset + bboxLinearIndex(idx, 1, na, bbox_anchor_dim,
+                                                                       bbox_channel_dim),
+                                   bbox_dtype) *
+                          stride;
+                float r = getFloat(bbox_layer.buffer,
+                                   bbox_batch_offset + bboxLinearIndex(idx, 2, na, bbox_anchor_dim,
+                                                                       bbox_channel_dim),
+                                   bbox_dtype) *
+                          stride;
+                float btm =
+                    getFloat(bbox_layer.buffer,
+                             bbox_batch_offset +
+                                 bboxLinearIndex(idx, 3, na, bbox_anchor_dim, bbox_channel_dim),
+                             bbox_dtype) *
+                    stride;
 
-            /* SCRFD bbox 格式: 中心到四边的距离 (l,t,r,b)，网络输出需乘 stride 得像素距离 */
-            float l = getFloat(bbox_layer.buffer, bboxLinearIndex(idx, 0, na, bbox_anchor_dim, bbox_channel_dim), bbox_dtype) * stride;
-            float t = getFloat(bbox_layer.buffer, bboxLinearIndex(idx, 1, na, bbox_anchor_dim, bbox_channel_dim), bbox_dtype) * stride;
-            float r = getFloat(bbox_layer.buffer, bboxLinearIndex(idx, 2, na, bbox_anchor_dim, bbox_channel_dim), bbox_dtype) * stride;
-            float b = getFloat(bbox_layer.buffer, bboxLinearIndex(idx, 3, na, bbox_anchor_dim, bbox_channel_dim), bbox_dtype) * stride;
+                /* distance2bbox: 左=中心x-左距，上=中心y-上距，右/下=中心+右/下距 */
+                float x1 = cx - l;
+                float y1 = cy - t;
+                float x2 = cx + r;
+                float y2 = cy + btm;
 
-            /* distance2bbox: 左=中心x-左距，上=中心y-上距，右/下=中心+右/下距 */
-            float x1 = cx - l;
-            float y1 = cy - t;
-            float x2 = cx + r;
-            float y2 = cy + b;
+                /*
+                 * SCRFD 做按锚点 的 墨迹密集预测 这里填的是「候选框」，不是最终每脸一个的框.
+                 * 每个 stride 对应一个特征图 每个网格点 就是 锚点
+                 * 每个锚点输出 1 个 分数(这个位置有人脸的概率) + 4 个 坐标(l,t,r,b)
+                 * 每个锚点 (12800+3200+800 个) 只要置信度(1 个分数) 大于等于 阈值就输出一个框，
+                 * 同一张脸会被多个锚点/多尺度重复检出，产生大量重叠框.
+                 * nvinfer 在 parser 返回后会对此 objectList 做 NMS，保留高置信度、抑制重叠框，
+                 * 得到 每脸一个 的最终 NvDsObjectMeta. 因此 parser 只负责：原始张量 → 候选框列表.
+                 */
+                NvDsInferObjectDetectionInfo obj;
+                obj.classId = 0; /* SCRFD 单类别: 0=face */
+                obj.detectionConfidence = conf;
+                obj.left = CLIP(x1, 0.f, (float)(net_w - 1));
+                obj.top = CLIP(y1, 0.f, (float)(net_h - 1));
+                obj.width = CLIP(x2 - x1 + 1.f, 1.f, (float)net_w);
+                obj.height = CLIP(y2 - y1 + 1.f, 1.f, (float)net_h);
 
-            /*
-             * SCRFD 做按锚点 的 墨迹密集预测 这里填的是「候选框」，不是最终每脸一个的框.
-             * 每个 stride 对应一个特征图 每个网格点 就是 锚点
-             * 每个锚点输出 1 个 分数(这个位置有人脸的概率) + 4 个 坐标(l,t,r,b)
-             * 每个锚点 (12800+3200+800 个) 只要置信度(1 个分数) 大于等于 阈值就输出一个框，
-             * 同一张脸会被多个锚点/多尺度重复检出，产生大量重叠框.
-             * nvinfer 在 parser 返回后会对此 objectList 做 NMS，保留高置信度、抑制重叠框，
-             * 得到 每脸一个 的最终 NvDsObjectMeta. 因此 parser 只负责：原始张量 → 候选框列表.
-             */
-            NvDsInferObjectDetectionInfo obj;
-            obj.classId = 0; /* SCRFD 单类别: 0=face */
-            obj.detectionConfidence = conf;
-            obj.left = CLIP(x1, 0.f, (float)(net_w - 1));
-            obj.top = CLIP(y1, 0.f, (float)(net_h - 1));
-            obj.width = CLIP(x2 - x1 + 1.f, 1.f, (float)net_w);
-            obj.height = CLIP(y2 - y1 + 1.f, 1.f, (float)net_h);
-
-            objectList.push_back(obj);
+                objectList.push_back(obj);
+            }
         }
     }
+    debug_layout_once = false;
 
     static bool debug_once = true;
-    if (debug_once)
-    {
+    if (debug_once) {
         debug_once = false;
         std::cerr << "[=] DEBUG | SCRFD parser: " << outputLayersInfo.size() << " layers, "
-                  << networkInfo.width << "x" << networkInfo.height << ", objects=" << objectList.size() << std::endl;
+                  << networkInfo.width << "x" << networkInfo.height
+                  << ", objects=" << objectList.size() << std::endl;
     }
     return true;
 }

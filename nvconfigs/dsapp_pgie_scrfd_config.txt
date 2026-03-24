@@ -23,6 +23,9 @@ onnx-file=/home/good/wkspace/pubdata/models/scrfd/scrfd_2.5g_bnkps_640x640.onnx
 # 单类别：人脸（标签文件一行 "face" 即可）
 labelfile-path=/home/good/wkspace/pubdata/models/scrfd/labels.txt
 
+# 与 preprocess 的 network-input-shape 首维保持一致
+# 当前 preprocess 为 2 路 x 每路 2 ROI => batch-size=4
+# 若改为 2, 必须同步把总 ROI 数降到 2, 并使用 _b2_ engine
 batch-size=4
 network-mode=2
 num-detected-classes=1

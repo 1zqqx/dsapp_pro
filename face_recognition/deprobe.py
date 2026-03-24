@@ -148,6 +148,39 @@ def _debug_pgie_src_probe(pad, info, u_data):
                 l_frame = l_frame.next
             except StopIteration:
                 break
+
+        # 一次性输出 preprocess 的 ROI 顺序,辅助确认 batch 槽位与 source_id 的映射
+        if not u_data.get("_roi_order_logged", False):
+            roi_debug = []
+            l_user_meta = batch_meta.batch_user_meta_list
+            while l_user_meta is not None:
+                try:
+                    user_meta = pyds.NvDsUserMeta.cast(l_user_meta.data)
+                except (StopIteration, TypeError):
+                    break
+                if user_meta.base_meta.meta_type == pyds.NVDS_PREPROCESS_BATCH_META:
+                    try:
+                        preprocess_batchmeta = pyds.GstNvDsPreProcessBatchMeta.cast(
+                            user_meta.user_meta_data
+                        )
+                    except (StopIteration, TypeError):
+                        break
+                    for idx, roi_meta in enumerate(preprocess_batchmeta.roi_vector):
+                        roi = roi_meta.roi
+                        fm = roi_meta.frame_meta
+                        roi_debug.append(
+                            f"slot={idx} src={fm.source_id} frame={fm.frame_num} "
+                            f"roi=({int(roi.left)},{int(roi.top)},{int(roi.width)},{int(roi.height)})"
+                        )
+                try:
+                    l_user_meta = l_user_meta.next
+                except StopIteration:
+                    break
+            if roi_debug:
+                logger.info(
+                    "[PGIE SRC] preprocess roi order: %s", " | ".join(roi_debug)
+                )
+            u_data["_roi_order_logged"] = True
     except Exception as e:
         logger.info(f"[PGIE SRC] e: {e}")
     finally:
@@ -168,8 +201,9 @@ class DeProbe:
         if not sink_pad or not src_pad:
             raise RuntimeError("Unable to get tee sink pad for probe")
 
-        sink_pad.add_probe(Gst.PadProbeType.BUFFER, _debug_pgie_sink_probe, None)
-        src_pad.add_probe(Gst.PadProbeType.BUFFER, _debug_pgie_src_probe, None)
+        probe_ctx = {"_roi_order_logged": False}
+        sink_pad.add_probe(Gst.PadProbeType.BUFFER, _debug_pgie_sink_probe, probe_ctx)
+        src_pad.add_probe(Gst.PadProbeType.BUFFER, _debug_pgie_src_probe, probe_ctx)
         logger.info(f" DeProbe attached ")
 
     def stop(self):
