@@ -211,4 +211,5 @@ __marimo__/
 **/logs/
 
 .vscode/
+.cursor/
 .idea/

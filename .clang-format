@@ -1,0 +1,29 @@
+---
+# 基础风格，Google、LLVM、Chromium 默认都是大括号在行末
+BasedOnStyle: Google
+
+# 核心配置：控制大括号换行
+# Attach: 大括号紧跟在语句末尾（你要的效果）
+# Linux: 函数定义换行，其他不换
+# Allman: 全部换行
+BreakBeforeBraces: Attach
+
+# 缩进宽度，通常设为 4
+IndentWidth: 4
+
+# 每行最大字符数，超出则自动换行
+ColumnLimit: 100
+
+# 允许短的 if 语句保持在同一行
+AllowShortIfStatementsOnASingleLine: true
+
+# 指针对齐方式 (Left: int* p; Right: int *p;)
+PointerAlignment: Left
+
+# 缩进 case 标签
+IndentCaseLabels: true
+
+# namespace 内函数缩进
+# None 不缩进; All 缩进; Inner 折中
+NamespaceIndentation: None
+---
