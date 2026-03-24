@@ -27,7 +27,7 @@ if _DSAPP_ROOT not in sys.path:
 from logger.get_logger import get_logger, setup_logging
 
 # 先初始化日志,再导入依赖 GStreamer 的模块
-setup_logging(level="DEBUG", log_file=None)
+setup_logging(level="INFO", log_file=None)
 logger = get_logger(__name__)
 
 
@@ -76,7 +76,7 @@ def get_example_config():
             },
             "pgie": {
                 "gpu_id": 0,
-                "batch_size": 1,  # FIXME modify, 2;4 & [model_engine_file] -> bug
+                "batch_size": 1,  # FIXME
                 "input_tensor_meta": True,
                 "config_file_path": "/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/nvconfigs/dsapp_pgie_scrfd_config.txt",
                 # "model_engine_file": "/home/good/wkspace/pubdata/models/scrfd/scrfd_2.5g_bnkps_640x640.onnx_b4_gpu0_fp16.engine",
@@ -120,7 +120,7 @@ def get_example_config():
 
 def run_basic():
     """仅构建并启动管道, Ctrl+C 退出."""
-    from face_recognition import FaceRecognitionPipeline
+    from pipelines.face_recognition import FaceRecognitionPipeline
 
     config = get_example_config()
 
@@ -154,7 +154,7 @@ def run_with_dynamic_api():
     """构建并启动后,在另一线程中演示动态 add_source / remove_source / enable_rtsp / disable_rtsp."""
     import threading
 
-    from face_recognition import FaceRecognitionPipeline
+    from pipelines.face_recognition import FaceRecognitionPipeline
 
     config = get_example_config()
     # 先只用一个源启动
