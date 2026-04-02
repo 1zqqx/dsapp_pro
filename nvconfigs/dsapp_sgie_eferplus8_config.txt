@@ -1,0 +1,36 @@
+################################################################################
+# nvinfer 配置：Secondary GIE - FER+ 情绪识别（emotion-ferplus-8）
+################################################################################
+
+[property]
+gpu-id=0
+net-scale-factor=1
+
+# emotion-ferplus-8.onnx 不支持 批处理 转换
+onnx-file=/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/models.temp/emotion-ferplus-8.onnx
+# model-engine-file=/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/models.temp/emotion-ferplus-8_dynamic_batch.onnx_b1_gpu0_fp16.engine
+
+batch-size=1
+network-mode=2
+
+process-mode=2
+is-classifier=1
+
+operate-on-gie-id=1
+operate-on-class-ids=0
+
+gie-unique-id=3
+
+parse-classifier-func-name=NvDsInferParseCustomEFerplus8
+custom-lib-path=/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/libs/libnvdsinfer_custom_e_ferplus_8.so
+
+labelfile-path=/home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/nvconfigs/dsapp_emotion_labels.txt
+
+classifier-async-mode=0
+classifier-threshold=0.3
+
+# XXX 输出原始 tensor 到 metadata，供 Python OSD 按对象解析情绪（避免 C++ 解析器只收到 batch=1 导致所有人脸同结果）
+output-tensor-meta=1
+
+# FER+ 模型输入为 64x64 单通道灰度；0=RGB 1=BGR 2=GRAY
+model-color-format=2
