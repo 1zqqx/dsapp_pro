@@ -17,8 +17,18 @@ def _create_face_recognition_pipeline(config: dict[str, Any]) -> Any:
     return FaceRecognitionPipeline(config)
 
 
+def _create_facial_emo_recog_pipeline(config: dict[str, Any]) -> Any:
+    from .pipelines.facial_emo_recog import FacialEmoRecogPipeline
+
+    # python -m dsapp \
+    # --pipeline FACIAL_EMO_RECOG \
+    # --config /home/good/wkspace/deepstream-sdk/deepstream_python_apps/apps/dsapp/config.format/instance_5.json
+    return FacialEmoRecogPipeline(config)
+
+
 PIPELINE_REGISTRY: dict[str, Callable[[dict[str, Any]], Any]] = {
     "FACE_RECOGNITION": _create_face_recognition_pipeline,
+    "FACIAL_EMO_RECOG": _create_facial_emo_recog_pipeline,
 }
 
 
