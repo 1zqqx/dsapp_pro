@@ -128,6 +128,10 @@ def acquire_nvinfer(index: int = 0, args: dict = None):
     if not pgie:
         raise RuntimeError(" Unable to create primary nvinfer ")
 
+    config_file_path = args.get("config_file_path", None)
+    if config_file_path:
+        pgie.set_property("config-file-path", config_file_path)
+
     gpu_id = args.get("gpu_id", None)
     if gpu_id is not None:
         pgie.set_property("gpu_id", gpu_id)
@@ -135,10 +139,6 @@ def acquire_nvinfer(index: int = 0, args: dict = None):
     batch_size = args.get("batch_size", None)
     if batch_size is not None:
         pgie.set_property("batch-size", batch_size)
-
-    config_file_path = args.get("config_file_path", None)
-    if config_file_path:
-        pgie.set_property("config-file-path", config_file_path)
 
     model_engine_file = args.get("model_engine_file", None)
     if model_engine_file:
@@ -174,6 +174,8 @@ def acquire_nvtracker(index: int = 0, args: dict = None):
     if not tracker:
         raise RuntimeError("Unable to create nvtracker")
 
+    # FIXED nvtracker 的 Gst 属性表里是 tracker-width/tracker-height/ll-lib-file/ll-config-file/gpu-id 等/没有 config-file-path
+    # nvtracker 里的 ll-config-file 不是"nvtracker 插件总配置文件",而是传给底层 low-level tracker 库(如 NvDCF/NvDeepSORT)的配置文件
     config_file = args.get("config_file")
     if config_file:
         config = configparser.ConfigParser()
